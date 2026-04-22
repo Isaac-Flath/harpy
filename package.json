@@ -1,11 +1,27 @@
 {
   "name": "harpy",
   "version": "0.1.0",
+  "description": "Custom Pi coding agent extensions, prompts, and themes.",
   "type": "module",
   "private": true,
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi",
+    "agent",
+    "extensions"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Isaac-Flath/harpy.git"
+  },
+  "homepage": "https://github.com/Isaac-Flath/harpy#readme",
+  "bugs": {
+    "url": "https://github.com/Isaac-Flath/harpy/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "pi": {
     "extensions": [
       "./extensions"
