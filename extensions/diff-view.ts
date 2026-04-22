@@ -798,6 +798,25 @@ function writeCallRender(
   return text;
 }
 
+// Pi 0.68's built-in edit renderCall renders a diff preview into the call slot.
+// Without this override, that preview shows alongside our renderResult diff,
+// producing a duplicate. We replace it with a header-only renderer.
+function editCallRender(
+  args: unknown,
+  theme: Theme,
+  context: { lastComponent: Component | undefined }
+): Component {
+  const filePath = getToolPath(args) ?? "...";
+  const text =
+    context.lastComponent instanceof Text
+      ? context.lastComponent
+      : new Text("", 0, 0);
+  text.setText(
+    `${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", filePath)}`
+  );
+  return text;
+}
+
 function diffRenderResult(
   result: AgentToolResult<EditToolDetails | WriteDiffDetails | undefined>,
   options: ToolRenderResultOptions,
@@ -876,6 +895,7 @@ export default function (pi: ExtensionAPI) {
   const builtinEdit = createEditToolDefinition(process.cwd());
   pi.registerTool({
     ...builtinEdit,
+    renderCall: editCallRender as any,
     renderResult: diffRenderResult as any,
   });
 
