@@ -1,0 +1,2 @@
+- Already very aggressive about kb wiki search and colgrep.  Too agressive
+- Look at witchcraft

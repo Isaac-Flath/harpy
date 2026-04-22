@@ -1,0 +1,35 @@
+{
+  "name": "harpy",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "themes": [
+      "./themes"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "spike": "tsx scripts/rlm-spike.ts"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "^0.67.2",
+    "@mariozechner/pi-coding-agent": "^0.67.2",
+    "@sinclair/typebox": "^0.34.0",
+    "@types/turndown": "^5.0.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@google/genai": "^1.17.0",
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.4"
+  }
+}
