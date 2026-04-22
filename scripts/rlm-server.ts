@@ -62,9 +62,9 @@ function parseArgs(): Args {
     investigatorModel: "gpt-5.4",
     analystProvider: "openai-codex",
     analystModel: "gpt-5.4-mini",
-    maxIterations: 30,
-    maxRecursiveCalls: 0,
-    maxBudget: 0.5,
+    maxIterations: 40,
+    maxRecursiveCalls: 2,
+    maxBudget: 1.0,
   };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {

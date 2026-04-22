@@ -54,19 +54,19 @@ const rlmQuerySchema = Type.Object({
   max_iterations: Type.Optional(
     Type.Number({
       description:
-        "Cap on turns per investigation (default 30). Most investigations converge in <10.",
+        "Cap on turns per investigation (default 40). Most investigations converge in <10.",
     }),
   ),
   max_recursive_calls: Type.Optional(
     Type.Number({
       description:
-        "How many layers of actual recursion `rlm_query` can do from inside the REPL. 0 (default) means rlm_query short-circuits to llm_query — no child investigation is spawned. 1 = one level of real recursion (parent can spawn children, children short-circuit). 2 = two levels, etc. Matches the paper's default behavior at 0.",
+        "How many layers of actual recursion `rlm_query` can do from inside the REPL. Default 2. 0 means rlm_query short-circuits to llm_query with no child investigation. 1 = one level of real recursion. 2 = two levels, so the root can spawn children and grandchildren.",
     }),
   ),
   max_budget: Type.Optional(
     Type.Number({
       description:
-        "Hard cap on total LM spend in USD across all depths and siblings (default 0.50).",
+        "Hard cap on total LM spend in USD across all depths and siblings (default 1.00, i.e. about one US dollar total across the whole investigation tree).",
     }),
   ),
   investigator_model: Type.Optional(
@@ -169,6 +169,9 @@ const DEFAULT_INVESTIGATOR_PROVIDER = "openai-codex";
 const DEFAULT_ANALYST_PROVIDER = "openai-codex";
 const DEFAULT_INVESTIGATOR_MODEL = "gpt-5.4";
 const DEFAULT_ANALYST_MODEL = "gpt-5.4-mini";
+const DEFAULT_MAX_ITERATIONS = 40;
+const DEFAULT_MAX_RECURSIVE_CALLS = 2;
+const DEFAULT_MAX_BUDGET = 1.0;
 
 const rlmQueryTool = defineTool({
   name: "rlm_query",
@@ -184,7 +187,7 @@ const rlmQueryTool = defineTool({
     "For a simple one-shot lookup ('is there a page about X?', 'find the file Y'), kb_search is still the right tool — rlm_query has $0.02-$0.15 setup cost and ~15-60s latency.",
     "terminated_reason='final' means the investigator emitted FINAL(answer). Other reasons ('max_iterations', 'budget_exceeded', 'no_code_blocks') indicate the investigation didn't converge — surface this clearly to the user.",
     "Default seed is mixed: 30 hits each from wiki:notes (curated), wiki:source (fetched references), and chats — 90 leads total. Each hit carries a `collection` field the investigator can filter by. Pass an explicit `scope` ('wiki', 'chats', etc.) to narrow to a single source.",
-    "max_recursive_calls=0 (default) matches the paper: rlm_query builtins short-circuit to plain LM calls. Bump to 1 to enable one layer of real recursion for sub-questions that themselves need decomposition.",
+    "max_recursive_calls defaults to 2. That allows real recursive investigations two layers deep: the root can spawn children, and children can spawn grandchildren. Set it to 0 if you want rlm_query builtins to short-circuit to plain LM calls instead.",
   ],
   parameters: rlmQuerySchema,
 
@@ -201,9 +204,10 @@ const rlmQueryTool = defineTool({
     // chats — k hits each). An explicit scope string is single-store.
     const scope = params.scope;
     const k = params.k ?? 30;
-    const maxIter = params.max_iterations ?? 30;
-    const maxRecursiveCalls = params.max_recursive_calls ?? 0;
-    const maxBudget = params.max_budget ?? 0.5;
+    const maxIter = params.max_iterations ?? DEFAULT_MAX_ITERATIONS;
+    const maxRecursiveCalls =
+      params.max_recursive_calls ?? DEFAULT_MAX_RECURSIVE_CALLS;
+    const maxBudget = params.max_budget ?? DEFAULT_MAX_BUDGET;
     const investigatorModelId =
       params.investigator_model ?? DEFAULT_INVESTIGATOR_MODEL;
     const analystModelId = params.analyst_model ?? DEFAULT_ANALYST_MODEL;

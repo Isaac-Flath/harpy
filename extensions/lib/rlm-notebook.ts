@@ -131,9 +131,9 @@ SERVER_ARGS = [
     "--investigator-model",    ${pyJson(meta.investigator_model)},
     "--analyst-provider",      ${pyJson(meta.analyst_provider)},
     "--analyst-model",         ${pyJson(meta.analyst_model)},
-    "--max-iterations",        str(${JSON.stringify(meta.max_iterations ?? 30)}),
-    "--max-recursive-calls",   str(${JSON.stringify(meta.max_recursive_calls ?? 0)}),
-    "--max-budget",            str(${JSON.stringify(meta.max_budget ?? 0.5)}),
+    "--max-iterations",        str(${JSON.stringify(meta.max_iterations ?? 40)}),
+    "--max-recursive-calls",   str(${JSON.stringify(meta.max_recursive_calls ?? 2)}),
+    "--max-budget",            str(${JSON.stringify(meta.max_budget ?? 1.0)}),
 ]
 
 _proc = subprocess.Popen(

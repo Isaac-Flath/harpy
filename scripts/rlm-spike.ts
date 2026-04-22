@@ -32,9 +32,9 @@ const DEFAULT_ANALYST_PROVIDER = "openai-codex";
 const DEFAULT_ANALYST_MODEL_ID = "gpt-5.4-mini";
 
 const DEFAULT_K = 30;
-const DEFAULT_MAX_ITER = 30;
-const DEFAULT_MAX_BUDGET = 0.5;
-const DEFAULT_MAX_RECURSIVE_CALLS = 0;
+const DEFAULT_MAX_ITER = 40;
+const DEFAULT_MAX_BUDGET = 1.0;
+const DEFAULT_MAX_RECURSIVE_CALLS = 2;
 
 async function main() {
   const args = process.argv.slice(2);

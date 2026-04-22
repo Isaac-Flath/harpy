@@ -308,6 +308,26 @@ function summarizeParams(
 // Main investigation loop
 // ---------------------------------------------------------------------------
 
+function buildNoCodeBlockRetryMessage(assistantText: string): string {
+  const trimmed = assistantText.trim();
+  const maxChars = 4000;
+  const preview =
+    trimmed.length === 0
+      ? "(empty assistant response)"
+      : trimmed.length > maxChars
+        ? `${trimmed.slice(0, maxChars)}\n\n[truncated]`
+        : trimmed;
+
+  return [
+    "Your last reply contained no executable ```repl``` block, so nothing ran and the investigation state did not change.",
+    "The REPL namespace still contains the variables and results from earlier turns.",
+    "Continue from the current REPL state. Write exactly one ```repl``` code block on this turn.",
+    "If you need more evidence, run more code. If you already have enough grounded material, produce the answer from inside the REPL instead of plain prose.",
+    "Last reply for reference:",
+    preview,
+  ].join("\n\n");
+}
+
 export async function runInvestigation(
   opts: InvestigationOptions,
 ): Promise<InvestigationResult> {
@@ -366,8 +386,10 @@ export async function runInvestigation(
     const history: Message[] = [
       { role: "user", content: opts.question, timestamp: Date.now() },
     ];
+    let allowedTurns = opts.maxIterations;
+    let noCodeBlockRetryAvailable = true;
 
-    for (let i = 0; i < opts.maxIterations; i++) {
+    for (let i = 0; i < allowedTurns; i++) {
       if (cumulativeCost >= opts.maxBudget) {
         terminatedReason = "budget_exceeded";
         break;
@@ -419,6 +441,7 @@ export async function runInvestigation(
       // Parse code blocks
       const blocks = parsePythonBlocks(assistantText);
       if (blocks.length === 0) {
+        const retryScheduled = noCodeBlockRetryAvailable;
         turns.push({ blocks: [], blockResults: [], lmCost });
         log?.write({
           type: "turn_end",
@@ -428,7 +451,34 @@ export async function runInvestigation(
           lm_cost: lmCost,
           cumulative_cost: cumulativeCost,
           blocks: 0,
+          final_emitted: false,
+          retry_scheduled: retryScheduled,
         });
+
+        opts.onUpdate?.({
+          depth: opts.depth,
+          turn: i + 1,
+          cumulativeCost,
+        });
+
+        if (retryScheduled) {
+          noCodeBlockRetryAvailable = false;
+          allowedTurns += 1;
+          log?.write({
+            type: "no_code_blocks_retry",
+            depth: opts.depth,
+            inv_id: invId,
+            i: i + 1,
+            assistant_text_preview: assistantText.slice(0, 2000),
+          });
+          history.push({
+            role: "user",
+            content: buildNoCodeBlockRetryMessage(assistantText),
+            timestamp: Date.now(),
+          });
+          continue;
+        }
+
         terminatedReason = "no_code_blocks";
         break;
       }
