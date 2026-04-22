@@ -396,12 +396,32 @@ function renderWordSegments(
 // Line rendering
 // =============================================================================
 
-function padLine(text: string, width: number, bgAnsi: string): string {
+function preserveBackground(text: string, bgAnsi: string): string {
+  return text
+    .replaceAll(BG_RST, BG_RST + bgAnsi)
+    .replaceAll(RST, RST + bgAnsi);
+}
+
+function padLine(
+  text: string,
+  width: number,
+  bgAnsi: string,
+  fillToWidth = true
+): string {
   const fitted =
     visibleWidth(text) > width ? truncateToWidth(text, width) : text;
   const vis = visibleWidth(fitted);
   const pad = Math.max(0, width - vis);
-  return bgAnsi + fitted + " ".repeat(pad) + RST;
+
+  if (!bgAnsi) {
+    return fitted + " ".repeat(pad);
+  }
+
+  const styled = bgAnsi + preserveBackground(fitted, bgAnsi);
+  if (fillToWidth) {
+    return styled + " ".repeat(pad) + RST;
+  }
+  return styled + RST + " ".repeat(pad);
 }
 
 function lineColors(
@@ -430,8 +450,8 @@ function lineColors(
 }
 
 // Render a single diff line (used by both unified and split views).
-// bgOverride/wordBgOverride let the split view supply panel-level colors;
-// when omitted the colors come from lineColors().
+// bgOverride/wordBgOverride let the split view supply custom colors.
+// fillToWidth controls whether the line background extends through trailing pad.
 function renderDiffLine(
   line: ParsedLine | null,
   wordSegs: WordSegment[] | null,
@@ -439,10 +459,11 @@ function renderDiffLine(
   theme: Theme,
   width: number,
   bgOverride?: string,
-  wordBgOverride?: string
+  wordBgOverride?: string,
+  fillToWidth = true
 ): string[] {
   if (!line) {
-    return [padLine("", width, bgOverride ?? palette.ctxBg)];
+    return [padLine("", width, bgOverride ?? "", fillToWidth)];
   }
 
   const sign =
@@ -471,7 +492,7 @@ function renderDiffLine(
     const prefix = i === 0 ? gutter : indent;
     const raw = prefix + wrappedChunks[i];
     const colored = theme.fg(fgColor as any, raw);
-    result.push(padLine(colored, width, bg));
+    result.push(padLine(colored, width, bg, fillToWidth));
   }
   return result;
 }
@@ -524,18 +545,15 @@ const GUTTER_WIDTH = 3;
 function joinPanels(
   leftLines: string[],
   rightLines: string[],
-  leftBg: string,
-  rightBg: string,
   gutter: string,
   panelWidth: number
 ): string[] {
   const maxRows = Math.max(leftLines.length, rightLines.length);
-  const blankLeft = padLine("", panelWidth, leftBg);
-  const blankRight = padLine("", panelWidth, rightBg);
+  const blank = " ".repeat(panelWidth);
   const rows: string[] = [];
   for (let i = 0; i < maxRows; i++) {
-    const left = i < leftLines.length ? leftLines[i] : blankLeft;
-    const right = i < rightLines.length ? rightLines[i] : blankRight;
+    const left = i < leftLines.length ? leftLines[i] : blank;
+    const right = i < rightLines.length ? rightLines[i] : blank;
     rows.push(left + gutter + right);
   }
   return rows;
@@ -555,43 +573,35 @@ function renderSplit(
     if (hunk.type === "ellipsis" || hunk.type === "context") {
       for (const line of hunk.lines!) {
         const leftLines = renderDiffLine(
-          line, null, palette, theme, panelWidth, palette.ctxBg
+          line, null, palette, theme, panelWidth, "", "", false
         );
         const rightLines = renderDiffLine(
-          line, null, palette, theme, panelWidth, palette.ctxBg
+          line, null, palette, theme, panelWidth, "", "", false
         );
         result.push(
-          ...joinPanels(
-            leftLines, rightLines,
-            palette.ctxBg, palette.ctxBg,
-            gutter, panelWidth
-          )
+          ...joinPanels(leftLines, rightLines, gutter, panelWidth)
         );
       }
     } else {
       for (const pair of hunk.pairs!) {
         const { removedSegs, addedSegs } = computePairWordDiff(pair);
 
-        const leftBg = pair.removed ? palette.removedBg : palette.ctxBg;
-        const rightBg = pair.added ? palette.addedBg : palette.ctxBg;
+        const leftBg = pair.removed ? palette.removedBg : "";
+        const rightBg = pair.added ? palette.addedBg : "";
 
         const leftLines = renderDiffLine(
           pair.removed, removedSegs,
           palette, theme, panelWidth,
-          leftBg, palette.removedWordBg
+          leftBg, palette.removedWordBg, false
         );
         const rightLines = renderDiffLine(
           pair.added, addedSegs,
           palette, theme, panelWidth,
-          rightBg, palette.addedWordBg
+          rightBg, palette.addedWordBg, false
         );
 
         result.push(
-          ...joinPanels(
-            leftLines, rightLines,
-            leftBg, rightBg,
-            gutter, panelWidth
-          )
+          ...joinPanels(leftLines, rightLines, gutter, panelWidth)
         );
       }
     }
@@ -680,6 +690,7 @@ class DiffComponent implements Component {
   private cachedLines: string[] | null = null;
   private cachedWidth = -1;
   private cachedExpanded = false;
+  private lastRenderedHeight = 0;
 
   constructor(
     hunks: DiffHunk[],
@@ -707,6 +718,20 @@ class DiffComponent implements Component {
     this.cachedWidth = -1;
   }
 
+  private withTrailingClear(lines: string[], width: number): string[] {
+    const previousHeight = this.lastRenderedHeight;
+    this.lastRenderedHeight = lines.length;
+
+    if (lines.length >= previousHeight) {
+      return lines;
+    }
+
+    return [
+      ...lines,
+      ...Array.from({ length: previousHeight - lines.length }, () => " ".repeat(width)),
+    ];
+  }
+
   render(width: number): string[] {
     if (
       this.cachedLines &&
@@ -718,12 +743,13 @@ class DiffComponent implements Component {
 
     // Code file collapsed: show summary instead of diff
     if (!this.expanded && this.collapsedSummary !== null) {
-      this.cachedLines = this.collapsedSummary.split("\n").map((line) =>
+      const lines = this.collapsedSummary.split("\n").map((line) =>
         visibleWidth(line) > width ? truncateToWidth(line, width) : line
       );
+      this.cachedLines = lines;
       this.cachedWidth = width;
       this.cachedExpanded = this.expanded;
-      return this.cachedLines;
+      return this.withTrailingClear(lines, width);
     }
 
     const useSplit = width >= SPLIT_MIN_WIDTH;
@@ -751,7 +777,7 @@ class DiffComponent implements Component {
     this.cachedLines = lines;
     this.cachedWidth = width;
     this.cachedExpanded = this.expanded;
-    return lines;
+    return this.withTrailingClear(lines, width);
   }
 }
 
