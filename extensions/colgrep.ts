@@ -53,6 +53,8 @@ interface ColgrepDetails {
   exclude?: string[];
   excludeDir?: string[];
   topK?: number;
+  model?: string;
+  alpha?: number;
   wholeWord: boolean;
   fixedStrings: boolean;
   codeOnly: boolean;
@@ -76,6 +78,8 @@ interface BuildArgsOptions {
   exclude?: string[];
   excludeDir?: string[];
   topK?: number;
+  model?: string;
+  alpha?: number;
   wholeWord: boolean;
   fixedStrings: boolean;
   codeOnly: boolean;
@@ -87,6 +91,8 @@ function buildArgs(opts: BuildArgsOptions): string[] {
   const args: string[] = [];
   // --json must come before the positional QUERY so colgrep doesn't swallow it.
   if (!opts.filesOnly) args.push("--json");
+  // Tool calls are non-interactive. Always auto-confirm indexing prompts.
+  args.push("-y");
   if (opts.filesOnly) args.push("-l");
   if (opts.pattern !== undefined) args.push("-e", opts.pattern);
   if (opts.include) args.push("--include", opts.include);
@@ -94,6 +100,8 @@ function buildArgs(opts: BuildArgsOptions): string[] {
   if (opts.excludeDir)
     for (const d of opts.excludeDir) args.push("--exclude-dir", d);
   if (opts.topK !== undefined) args.push("-k", String(opts.topK));
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.alpha !== undefined) args.push("--alpha", String(opts.alpha));
   if (opts.wholeWord) args.push("-w");
   if (opts.fixedStrings) args.push("-F");
   if (opts.codeOnly) args.push("--code-only");
@@ -112,14 +120,16 @@ function guardAgainstCommonMistakes(opts: BuildArgsOptions): void {
   if (opts.pattern !== undefined && opts.pattern.length === 0) {
     throw new Error("pattern must be non-empty when provided");
   }
-  if (
-    opts.query === undefined &&
-    opts.pattern === undefined &&
-    !opts.filesOnly
-  ) {
+  if (opts.query === undefined && opts.pattern === undefined) {
     throw new Error(
-      "Provide at least `query` (semantic) or `pattern` (regex). Both together = hybrid search."
+      "Provide at least `query` (semantic) or `pattern` (regex). `files_only` still needs something to search for."
     );
+  }
+  if (
+    opts.alpha !== undefined &&
+    (!Number.isFinite(opts.alpha) || opts.alpha < 0 || opts.alpha > 1)
+  ) {
+    throw new Error("alpha must be between 0.0 and 1.0");
   }
   // Detect the "pipe-separated keyword list in -e" mistake from the tooling
   // recommendations doc. A single-atom alternation like "(a|b|c)" is fine; the
@@ -151,7 +161,10 @@ function formatColgrepCall(args: ColgrepInput, theme: Theme): string {
     pieces.push(theme.fg("dim", `-e ${JSON.stringify(args.pattern)}`));
   if (args.paths?.length) pieces.push(theme.fg("dim", args.paths.join(" ")));
   if (args.include) pieces.push(theme.fg("dim", `--include ${args.include}`));
-  if (args.top_k) pieces.push(theme.fg("dim", `-k ${args.top_k}`));
+  if (args.top_k !== undefined) pieces.push(theme.fg("dim", `-k ${args.top_k}`));
+  if (args.model) pieces.push(theme.fg("dim", `--model ${args.model}`));
+  if (args.alpha !== undefined)
+    pieces.push(theme.fg("dim", `--alpha ${args.alpha}`));
   if (args.files_only) pieces.push(theme.fg("dim", "-l"));
   if (args.whole_word) pieces.push(theme.fg("dim", "-w"));
   if (args.fixed_strings) pieces.push(theme.fg("dim", "-F"));
@@ -178,6 +191,8 @@ function renderAsLines(d: ColgrepDetails, expanded: boolean): string[] {
   if (d.query) header.push(JSON.stringify(d.query));
   if (d.pattern) header.push(dim(`-e ${JSON.stringify(d.pattern)}`));
   if (d.paths?.length) header.push(dim(d.paths.join(" ")));
+  if (d.model) header.push(dim(`--model ${d.model}`));
+  if (d.alpha !== undefined) header.push(dim(`--alpha ${d.alpha}`));
   lines.push(header.join(" "));
 
   if (d.mode === "files_only") {
@@ -355,6 +370,20 @@ const colgrepSchema = Type.Object({
   top_k: Type.Optional(
     Type.Number({ description: "Number of results (default: colgrep default, 15)." })
   ),
+  model: Type.Optional(
+    Type.String({
+      description:
+        "ColBERT model HuggingFace ID or local path (--model). Uses the saved colgrep preference if not specified.",
+    })
+  ),
+  alpha: Type.Optional(
+    Type.Number({
+      description:
+        "Hybrid search alpha between keyword (0.0) and semantic (1.0) scoring (--alpha). Default: colgrep default, 0.75.",
+      minimum: 0,
+      maximum: 1,
+    })
+  ),
   whole_word: Type.Optional(
     Type.Boolean({ description: "Match whole words only for `pattern` (-w)." })
   ),
@@ -377,7 +406,7 @@ const colgrepSchema = Type.Object({
   files_only: Type.Optional(
     Type.Boolean({
       description:
-        "Return only a list of matching file paths (-l). Equivalent to grep -l. Incompatible with --json; the tool returns plain filenames in this mode.",
+        "Return only a list of matching file paths (-l). Equivalent to grep -l. Incompatible with --json; the tool returns plain filenames in this mode. Still requires `query` or `pattern`.",
     })
   ),
 });
@@ -401,6 +430,7 @@ const colgrepTool = defineTool({
     "`pattern` is ONE regex, not a pipe-separated keyword list. For several keywords, put them in `query`. For alternation, use a real regex group like `(auth|login|signin)`.",
     "Use `paths` to scope to specific files/directories, `include` to filter by extension, `exclude`/`exclude_dir` to skip noise.",
     "Use `files_only: true` when you just need the list of matching files.",
+    "Use `model` or `alpha` only when the task explicitly needs search tuning.",
     "If one call returns nothing, try a broader `query` before running many narrow variants.",
     "colgrep cannot search files outside the current project's index. Use read/list_dir/bash for that.",
   ],
@@ -425,6 +455,8 @@ const colgrepTool = defineTool({
       exclude: params.exclude,
       excludeDir: params.exclude_dir,
       topK: params.top_k,
+      model: params.model,
+      alpha: params.alpha,
       wholeWord: params.whole_word ?? false,
       fixedStrings: params.fixed_strings ?? false,
       codeOnly: params.code_only ?? false,
@@ -458,6 +490,8 @@ const colgrepTool = defineTool({
       exclude: opts.exclude,
       excludeDir: opts.excludeDir,
       topK: opts.topK,
+      model: opts.model,
+      alpha: opts.alpha,
       wholeWord: opts.wholeWord,
       fixedStrings: opts.fixedStrings,
       codeOnly: opts.codeOnly,
