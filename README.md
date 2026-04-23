@@ -62,6 +62,7 @@ Re-run `./setup.sh` after changing prompts, extensions, or themes.
 | `extensions/diff-view.ts` | Improves how `edit` and `write` diffs render |
 | `extensions/read-view.ts` | Improves collapsed summaries for `read` output |
 | `extensions/prevent-idle-sleep.ts` | Prevents macOS idle sleep with `caffeinate` |
+| `extensions/resume-last.ts` | Prints the exact `pi --session ...` command to resume the current session when Pi exits |
 | `prompts/APPEND_SYSTEM.md` | Extends the system prompt with AgentKB, colgrep, RLM, GitHub API, and Gemini guidance |
 | `themes/ghostie.json` | Adds a Ghostty-friendly light theme |
 
