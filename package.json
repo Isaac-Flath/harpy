@@ -32,7 +32,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "spike": "tsx scripts/rlm-spike.ts"
+    "llm-server": "tsx scripts/llm-server.ts"
   },
   "devDependencies": {
     "@mariozechner/pi-ai": "^0.67.2",

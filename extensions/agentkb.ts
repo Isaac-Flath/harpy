@@ -616,7 +616,7 @@ const kbSearchTool = defineTool({
     "Search accumulated knowledge: lessons, corrections, preferences, gotchas",
   promptGuidelines: [
     "Use kb_search for targeted lookups: 'does the KB mention X', 'find the page about Y', one-shot sanity checks.",
-    "For multi-step research questions (gotchas, how-tos, compare approaches, synthesize across pages), call rlm_query directly instead — it does the filter/read/synthesize loop for you.",
+    "For multi-step research questions, combine kb_search with kb_read and scripted LLM fanout (see harpy_llm.py) to filter, read, and synthesize across pages.",
     "Search after the user corrects you or expresses a preference — there may be related guidance already recorded.",
     "Use scope='wiki' for distilled knowledge (default), scope='chats' for raw session history, scope='all' for both.",
     "Use the pattern parameter for hybrid semantic+regex search when you know a specific identifier or pattern.",
