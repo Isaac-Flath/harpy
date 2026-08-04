@@ -60,8 +60,9 @@ Re-run `./setup.sh` after changing prompts or extensions.
 | `extensions/pyramid.ts` | Adds `pyramid` for Minto-pyramid communication: recommendations, plans, and argument structures, answer-first |
 | `extensions/subagent.ts` | Adds `subagent` for delegating tasks to agents defined in `agents/*.md` |
 | `agents/signal-librarian.md` | Demand-research subagent: compiles demand-evidence briefs from the AgentKB signal database |
+| `extensions/bash-view.ts` | Collapses `bash` output to one line: command + `✓ N lines`, with a one-line live tail while running |
 | `extensions/diff-view.ts` | Improves how `edit` and `write` diffs render |
-| `extensions/read-view.ts` | Improves collapsed summaries for `read` output |
+| `extensions/read-view.ts` | Improves collapsed summaries for `read` output and merges consecutive reads into one `read N files: …` line |
 | `extensions/prevent-idle-sleep.ts` | Prevents macOS idle sleep with `caffeinate` |
 | `extensions/resume-last.ts` | Prints the exact `pi --session ...` command to resume the current session when Pi exits |
 | `prompts/APPEND_SYSTEM.md` | Extends the system prompt with AgentKB, colgrep, GitHub API, and Gemini guidance |
