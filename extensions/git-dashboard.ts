@@ -111,31 +111,31 @@ function formatGitDashboardCall(args: GitDashboardInput, theme: Theme): string {
   return `${theme.fg("toolTitle", theme.bold("git_dashboard"))} ${flags.join(" ")}`;
 }
 
-function renderAsLines(d: GitDashboardDetails): string[] {
+function renderAsLines(d: GitDashboardDetails, theme: Theme): string[] {
   const lines: string[] = [];
 
   if (!d.isRepo) {
-    lines.push(dim("Not a git repository: " + d.cwd));
+    lines.push(dim(theme, "Not a git repository: " + d.cwd));
     return lines;
   }
 
   const branch = d.branch || "(detached)";
   const upstreamInfo = d.upstream
-    ? `${d.upstream}${d.ahead || d.behind ? dim(`  (ahead ${d.ahead}, behind ${d.behind})`) : ""}`
-    : dim("no upstream");
-  lines.push(`${bold("Branch:")} ${branch}  ${bold("→")} ${upstreamInfo}`);
+    ? `${d.upstream}${d.ahead || d.behind ? dim(theme, `  (ahead ${d.ahead}, behind ${d.behind})`) : ""}`
+    : dim(theme, "no upstream");
+  lines.push(`${bold(theme, "Branch:")} ${branch}  ${bold(theme, "→")} ${upstreamInfo}`);
 
   const totalChanges = d.staged.length + d.unstaged.length + d.untracked.length;
   lines.push("");
   lines.push(
-    `${bold("Working tree:")} ${totalChanges === 0 ? dim("clean") : `${totalChanges} changed`}`
+    `${bold(theme, "Working tree:")} ${totalChanges === 0 ? dim(theme, "clean") : `${totalChanges} changed`}`
   );
 
   const pushSection = (title: string, entries: StatusEntry[]) => {
     if (entries.length === 0) return;
-    lines.push(`  ${bold(title)} (${entries.length})`);
+    lines.push(`  ${bold(theme, title)} (${entries.length})`);
     for (const e of entries) {
-      lines.push(`    ${dim(e.status)} ${e.path}`);
+      lines.push(`    ${dim(theme, e.status)} ${e.path}`);
     }
   };
   pushSection("Staged", d.staged);
@@ -145,20 +145,20 @@ function renderAsLines(d: GitDashboardDetails): string[] {
   if (d.changedFromUpstream.length > 0) {
     lines.push("");
     lines.push(
-      `${bold("Changed vs upstream")} (${d.changedFromUpstream.length})`
+      `${bold(theme, "Changed vs upstream")} (${d.changedFromUpstream.length})`
     );
     for (const f of d.changedFromUpstream) lines.push(`  ${f}`);
   }
 
   if (d.recentCommits.length > 0) {
     lines.push("");
-    lines.push(`${bold("Recent commits")} (${d.recentCommits.length})`);
+    lines.push(`${bold(theme, "Recent commits")} (${d.recentCommits.length})`);
     for (const c of d.recentCommits) lines.push(`  ${c}`);
   }
 
   for (const note of d.notes) {
     lines.push("");
-    lines.push(dim(note));
+    lines.push(dim(theme, note));
   }
 
   return lines;
@@ -166,19 +166,23 @@ function renderAsLines(d: GitDashboardDetails): string[] {
 
 class GitDashboardComponent implements Component {
   private details: GitDashboardDetails;
+  private theme: Theme;
   private expanded: boolean;
   private cachedLines: string[] | null = null;
   private cachedWidth = -1;
   private cachedExpanded = false;
 
-  constructor(details: GitDashboardDetails, expanded: boolean) {
+  constructor(details: GitDashboardDetails, expanded: boolean, theme: Theme) {
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
   }
 
-  setState(details: GitDashboardDetails, expanded: boolean): void {
-    const changed = this.details !== details || this.expanded !== expanded;
+  setState(details: GitDashboardDetails, expanded: boolean, theme: Theme): void {
+    const changed =
+      this.details !== details || this.theme !== theme || this.expanded !== expanded;
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
     if (changed) this.cachedLines = null;
   }
@@ -197,7 +201,7 @@ class GitDashboardComponent implements Component {
       return this.cachedLines;
     }
 
-    const lines = renderAsLines(this.details);
+    const lines = renderAsLines(this.details, this.theme);
     this.cachedLines = this.expanded
       ? wrapAnsiLines(lines, width)
       : lines.map((line) =>
@@ -225,7 +229,7 @@ function gitDashboardRenderCall(
 function gitDashboardRenderResult(
   result: AgentToolResult<GitDashboardDetails>,
   options: ToolRenderResultOptions,
-  _theme: Theme,
+  theme: Theme,
   context: { lastComponent: Component | undefined; isError: boolean }
 ): Component {
   if (context.isError || !result.details) {
@@ -238,11 +242,11 @@ function gitDashboardRenderResult(
   }
 
   if (context.lastComponent instanceof GitDashboardComponent) {
-    context.lastComponent.setState(result.details, options.expanded);
+    context.lastComponent.setState(result.details, options.expanded, theme);
     return context.lastComponent;
   }
 
-  return new GitDashboardComponent(result.details, options.expanded);
+  return new GitDashboardComponent(result.details, options.expanded, theme);
 }
 
 // =============================================================================

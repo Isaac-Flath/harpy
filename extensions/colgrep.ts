@@ -183,23 +183,23 @@ function fileDisplay(d: ColgrepDetails, absPath: string): string {
   return absPath;
 }
 
-function renderAsLines(d: ColgrepDetails, expanded: boolean): string[] {
+function renderAsLines(d: ColgrepDetails, expanded: boolean, theme: Theme): string[] {
   const lines: string[] = [];
 
   // Header summarizing input.
-  const header: string[] = [bold("colgrep")];
+  const header: string[] = [bold(theme, "colgrep")];
   if (d.query) header.push(JSON.stringify(d.query));
-  if (d.pattern) header.push(dim(`-e ${JSON.stringify(d.pattern)}`));
-  if (d.paths?.length) header.push(dim(d.paths.join(" ")));
-  if (d.model) header.push(dim(`--model ${d.model}`));
-  if (d.alpha !== undefined) header.push(dim(`--alpha ${d.alpha}`));
+  if (d.pattern) header.push(dim(theme, `-e ${JSON.stringify(d.pattern)}`));
+  if (d.paths?.length) header.push(dim(theme, d.paths.join(" ")));
+  if (d.model) header.push(dim(theme, `--model ${d.model}`));
+  if (d.alpha !== undefined) header.push(dim(theme, `--alpha ${d.alpha}`));
   lines.push(header.join(" "));
 
   if (d.mode === "files_only") {
     lines.push("");
-    lines.push(bold(`Files (${d.files.length})`));
+    lines.push(bold(theme, `Files (${d.files.length})`));
     if (d.files.length === 0) {
-      lines.push(dim("  (no matches)"));
+      lines.push(dim(theme, "  (no matches)"));
     } else {
       for (const f of d.files) lines.push(`  ${f}`);
     }
@@ -207,11 +207,11 @@ function renderAsLines(d: ColgrepDetails, expanded: boolean): string[] {
   }
 
   lines.push("");
-  lines.push(bold(`Results (${d.results.length})`));
+  lines.push(bold(theme, `Results (${d.results.length})`));
 
   if (d.results.length === 0) {
     lines.push(
-      dim("  No matches. Try a broader semantic query or relax the regex.")
+      dim(theme, "  No matches. Try a broader semantic query or relax the regex.")
     );
     return lines;
   }
@@ -225,26 +225,26 @@ function renderAsLines(d: ColgrepDetails, expanded: boolean): string[] {
     if (u.language) meta.push(u.language);
     const metaStr = meta.length ? ` [${meta.join("/")}]` : "";
     const name = u.name ? ` ${u.name}` : "";
-    const header = `  ${bold(`[${i + 1}] ${loc}`)}${dim(metaStr)}${name}  ${dim(`(${r.score.toFixed(3)})`)}`;
+    const header = `  ${bold(theme, `[${i + 1}] ${loc}`)}${dim(theme, metaStr)}${name}  ${dim(theme, `(${r.score.toFixed(3)})`)}`;
     lines.push(header);
 
     if (!expanded) continue;
 
     if (u.signature) {
-      lines.push(`    ${dim(summarizeSingleLine(u.signature, 160))}`);
+      lines.push(`    ${dim(theme, summarizeSingleLine(u.signature, 160))}`);
     }
     if (u.code) {
       lines.push("");
       for (const cl of u.code.split("\n")) lines.push(`    ${cl}`);
     }
     if (i < d.results.length - 1) {
-      lines.push("", dim("  ───"), "");
+      lines.push("", dim(theme, "  ───"), "");
     }
   }
 
   if (d.rawNote) {
     lines.push("");
-    lines.push(dim(d.rawNote));
+    lines.push(dim(theme, d.rawNote));
   }
 
   return lines;
@@ -252,19 +252,23 @@ function renderAsLines(d: ColgrepDetails, expanded: boolean): string[] {
 
 class ColgrepComponent implements Component {
   private details: ColgrepDetails;
+  private theme: Theme;
   private expanded: boolean;
   private cachedLines: string[] | null = null;
   private cachedWidth = -1;
   private cachedExpanded = false;
 
-  constructor(details: ColgrepDetails, expanded: boolean) {
+  constructor(details: ColgrepDetails, expanded: boolean, theme: Theme) {
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
   }
 
-  setState(details: ColgrepDetails, expanded: boolean): void {
-    const changed = this.details !== details || this.expanded !== expanded;
+  setState(details: ColgrepDetails, expanded: boolean, theme: Theme): void {
+    const changed =
+      this.details !== details || this.theme !== theme || this.expanded !== expanded;
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
     if (changed) this.cachedLines = null;
   }
@@ -282,7 +286,7 @@ class ColgrepComponent implements Component {
     ) {
       return this.cachedLines;
     }
-    const lines = renderAsLines(this.details, this.expanded);
+    const lines = renderAsLines(this.details, this.expanded, this.theme);
     this.cachedLines = this.expanded
       ? wrapAnsiLines(lines, width)
       : lines.map((line) =>
@@ -310,7 +314,7 @@ function colgrepRenderCall(
 function colgrepRenderResult(
   result: AgentToolResult<ColgrepDetails>,
   options: ToolRenderResultOptions,
-  _theme: Theme,
+  theme: Theme,
   context: { lastComponent: Component | undefined; isError: boolean }
 ): Component {
   if (context.isError || !result.details) {
@@ -322,10 +326,10 @@ function colgrepRenderResult(
     return text;
   }
   if (context.lastComponent instanceof ColgrepComponent) {
-    context.lastComponent.setState(result.details, options.expanded);
+    context.lastComponent.setState(result.details, options.expanded, theme);
     return context.lastComponent;
   }
-  return new ColgrepComponent(result.details, options.expanded);
+  return new ColgrepComponent(result.details, options.expanded, theme);
 }
 
 // =============================================================================

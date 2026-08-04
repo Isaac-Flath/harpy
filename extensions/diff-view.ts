@@ -127,9 +127,53 @@ const RANGE_SUMMARY_LIMIT = 6;
 // =============================================================================
 
 function parseAnsiRgb(ansi: string): RGB | null {
-  const match = ansi.match(/\x1b\[\d+;2;(\d+);(\d+);(\d+)m/);
-  if (!match) return null;
-  return { r: +match[1], g: +match[2], b: +match[3] };
+  const trueColor = ansi.match(/\x1b\[\d+;2;(\d+);(\d+);(\d+)m/);
+  if (trueColor) {
+    return { r: +trueColor[1], g: +trueColor[2], b: +trueColor[3] };
+  }
+
+  const indexed = ansi.match(/\x1b\[\d+;5;(\d+)m/);
+  if (!indexed) return null;
+
+  const index = Number(indexed[1]);
+  if (index < 16) {
+    const basic: RGB[] = [
+      { r: 0, g: 0, b: 0 },
+      { r: 128, g: 0, b: 0 },
+      { r: 0, g: 128, b: 0 },
+      { r: 128, g: 128, b: 0 },
+      { r: 0, g: 0, b: 128 },
+      { r: 128, g: 0, b: 128 },
+      { r: 0, g: 128, b: 128 },
+      { r: 192, g: 192, b: 192 },
+      { r: 128, g: 128, b: 128 },
+      { r: 255, g: 0, b: 0 },
+      { r: 0, g: 255, b: 0 },
+      { r: 255, g: 255, b: 0 },
+      { r: 0, g: 0, b: 255 },
+      { r: 255, g: 0, b: 255 },
+      { r: 0, g: 255, b: 255 },
+      { r: 255, g: 255, b: 255 },
+    ];
+    return basic[index] ?? null;
+  }
+
+  if (index <= 231) {
+    const cube = index - 16;
+    const channel = (value: number) => (value === 0 ? 0 : 55 + value * 40);
+    return {
+      r: channel(Math.floor(cube / 36)),
+      g: channel(Math.floor((cube % 36) / 6)),
+      b: channel(cube % 6),
+    };
+  }
+
+  if (index <= 255) {
+    const value = 8 + (index - 232) * 10;
+    return { r: value, g: value, b: value };
+  }
+
+  return null;
 }
 
 function mixRgb(base: RGB, tint: RGB, alpha: number): RGB {
@@ -149,17 +193,28 @@ function derivePalette(theme: Theme): DiffPalette {
   const addFg = parseAnsiRgb(theme.getFgAnsi("toolDiffAdded"));
   const delFg = parseAnsiRgb(theme.getFgAnsi("toolDiffRemoved"));
 
-  // Fallback base if ANSI parsing fails (light gray)
-  const base = baseBg ?? { r: 234, g: 235, b: 232 };
+  // If the theme uses the terminal's default background, do not invent a
+  // light one. Use the theme's own tool backgrounds for changed lines and no
+  // background for context lines.
+  if (!baseBg) {
+    return {
+      addedBg: theme.getBgAnsi("toolSuccessBg"),
+      removedBg: theme.getBgAnsi("toolErrorBg"),
+      ctxBg: "",
+      addedWordBg: theme.getBgAnsi("toolSuccessBg"),
+      removedWordBg: theme.getBgAnsi("toolErrorBg"),
+    };
+  }
+
   const addTint = addFg ?? { r: 42, g: 110, b: 5 };
   const delTint = delFg ?? { r: 168, g: 37, b: 37 };
 
   return {
-    addedBg: rgbToBgAnsi(mixRgb(base, addTint, LINE_BG_MIX)),
-    removedBg: rgbToBgAnsi(mixRgb(base, delTint, LINE_BG_MIX)),
-    ctxBg: rgbToBgAnsi(base),
-    addedWordBg: rgbToBgAnsi(mixRgb(base, addTint, WORD_BG_MIX)),
-    removedWordBg: rgbToBgAnsi(mixRgb(base, delTint, WORD_BG_MIX)),
+    addedBg: rgbToBgAnsi(mixRgb(baseBg, addTint, LINE_BG_MIX)),
+    removedBg: rgbToBgAnsi(mixRgb(baseBg, delTint, LINE_BG_MIX)),
+    ctxBg: rgbToBgAnsi(baseBg),
+    addedWordBg: rgbToBgAnsi(mixRgb(baseBg, addTint, WORD_BG_MIX)),
+    removedWordBg: rgbToBgAnsi(mixRgb(baseBg, delTint, WORD_BG_MIX)),
   };
 }
 
@@ -713,6 +768,14 @@ class DiffComponent implements Component {
     }
   }
 
+  setTheme(theme: Theme): void {
+    if (this.theme !== theme) {
+      this.theme = theme;
+      this.palette = derivePalette(theme);
+      this.cachedLines = null;
+    }
+  }
+
   invalidate(): void {
     this.cachedLines = null;
     this.cachedWidth = -1;
@@ -846,6 +909,7 @@ function diffRenderResult(
   const created = Boolean((details as WriteDiffDetails | undefined)?.created);
 
   if (context.lastComponent instanceof DiffComponent) {
+    context.lastComponent.setTheme(theme);
     context.lastComponent.setExpanded(options.expanded);
     return context.lastComponent;
   }

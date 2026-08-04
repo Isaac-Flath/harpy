@@ -1,16 +1,12 @@
+import type { Theme } from "@mariozechner/pi-coding-agent";
 import { visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 
-const BOLD = "\x1b[1m";
-const BOLD_END = "\x1b[22m";
-const DIM = "\x1b[2m";
-const DIM_END = "\x1b[22m";
-
-export function bold(text: string): string {
-  return BOLD + text + BOLD_END;
+export function bold(theme: Theme, text: string): string {
+  return theme.bold(text);
 }
 
-export function dim(text: string): string {
-  return DIM + text + DIM_END;
+export function dim(theme: Theme, text: string): string {
+  return theme.fg("dim", text);
 }
 
 export function summarizeSingleLine(text: string, maxLength = 100): string {

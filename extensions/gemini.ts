@@ -417,18 +417,21 @@ async function runGeminiRequest(
 
 class GeminiComponent implements Component {
   private details: GeminiDetails;
+  private theme: Theme;
   private expanded: boolean;
   private cachedLines: string[] | null = null;
   private cachedWidth = -1;
   private cachedExpanded = false;
 
-  constructor(details: GeminiDetails, expanded: boolean) {
+  constructor(details: GeminiDetails, expanded: boolean, theme: Theme) {
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
   }
 
-  setState(details: GeminiDetails, expanded: boolean): void {
+  setState(details: GeminiDetails, expanded: boolean, theme: Theme): void {
     const changed =
+      this.theme !== theme ||
       this.expanded !== expanded ||
       this.details.responseText !== details.responseText ||
       this.details.fullPrompt !== details.fullPrompt ||
@@ -436,6 +439,7 @@ class GeminiComponent implements Component {
       this.details.truncated !== details.truncated;
 
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
     if (changed) this.cachedLines = null;
   }
@@ -462,17 +466,17 @@ class GeminiComponent implements Component {
     let lines: string[];
     if (!this.expanded) {
       lines = [
-        bold(summary),
-        dim(`Prompt: ${summarizeSingleLine(d.prompt, 90)}`),
-        dim(`Response: ${summarizeSingleLine(d.responseText, 90)}`),
+        bold(this.theme, summary),
+        dim(this.theme, `Prompt: ${summarizeSingleLine(d.prompt, 90)}`),
+        dim(this.theme, `Response: ${summarizeSingleLine(d.responseText, 90)}`),
       ];
       if (d.truncated && d.fullPath) {
-        lines.push(dim(`Full response saved to: ${d.fullPath}`));
+        lines.push(dim(this.theme, `Full response saved to: ${d.fullPath}`));
       }
     } else {
       const usage = formatUsage(d);
       lines = [
-        bold("Request"),
+        bold(this.theme, "Request"),
         `  Model: ${d.model}`,
         `  Backend: ${d.backend}`,
         `  max_output_chars: ${d.maxOutputChars}`,
@@ -481,21 +485,21 @@ class GeminiComponent implements Component {
 
       if (usage) lines.push(`  Usage: ${usage}`);
 
-      lines.push("", bold("Prompt (agent input)"));
+      lines.push("", bold(this.theme, "Prompt (agent input)"));
       for (const line of d.prompt.split("\n")) {
         lines.push(`  ${line}`);
       }
 
       if (d.fullPrompt !== d.prompt) {
-        lines.push("", bold("Exact prompt sent to Gemini"));
+        lines.push("", bold(this.theme, "Exact prompt sent to Gemini"));
         for (const line of d.fullPrompt.split("\n")) {
           lines.push(`  ${line}`);
         }
       }
 
-      lines.push("", bold(`Attachments (${d.files.length})`));
+      lines.push("", bold(this.theme, `Attachments (${d.files.length})`));
       if (!d.files.length) {
-        lines.push(dim("  None"));
+        lines.push(dim(this.theme, "  None"));
       } else {
         d.files.forEach((file, index) => {
           lines.push(`  [${index + 1}] ${file.name}`);
@@ -505,9 +509,9 @@ class GeminiComponent implements Component {
         });
       }
 
-      lines.push("", bold(`Context files (${d.contextFiles.length})`));
+      lines.push("", bold(this.theme, `Context files (${d.contextFiles.length})`));
       if (!d.contextFiles.length) {
-        lines.push(dim("  None"));
+        lines.push(dim(this.theme, "  None"));
       } else {
         d.contextFiles.forEach((file, index) => {
           lines.push(`  [${index + 1}] ${file.name}`);
@@ -517,7 +521,7 @@ class GeminiComponent implements Component {
         });
       }
 
-      lines.push("", bold("Response"), `  Chars: ${d.responseChars}`);
+      lines.push("", bold(this.theme, "Response"), `  Chars: ${d.responseChars}`);
       if (d.truncated && d.fullPath) {
         lines.push(`  Full response path: ${d.fullPath}`);
       }
@@ -541,7 +545,7 @@ class GeminiComponent implements Component {
 function renderGeminiResult(
   result: AgentToolResult<GeminiDetails>,
   options: ToolRenderResultOptions,
-  _theme: Theme,
+  theme: Theme,
   context: { lastComponent: Component | undefined; isError: boolean }
 ): Component {
   if (context.isError || !result.details) {
@@ -555,11 +559,11 @@ function renderGeminiResult(
 
   const details = result.details;
   if (context.lastComponent instanceof GeminiComponent) {
-    context.lastComponent.setState(details, options.expanded);
+    context.lastComponent.setState(details, options.expanded, theme);
     return context.lastComponent;
   }
 
-  return new GeminiComponent(details, options.expanded);
+  return new GeminiComponent(details, options.expanded, theme);
 }
 
 const geminiTool = defineTool({

@@ -175,13 +175,15 @@ class ListDirComponent implements Component {
     this.expanded = expanded;
   }
 
-  setState(output: string, details: ListDirDetails, expanded: boolean): void {
+  setState(output: string, details: ListDirDetails, expanded: boolean, theme: Theme): void {
     const changed =
       this.output !== output ||
       this.details !== details ||
-      this.expanded !== expanded;
+      this.expanded !== expanded ||
+      this.theme !== theme;
     this.output = output;
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
     if (changed) {
       this.cachedLines = null;
@@ -256,7 +258,7 @@ function listDirRenderResult(
   }
 
   if (context.lastComponent instanceof ListDirComponent) {
-    context.lastComponent.setState(output, result.details, options.expanded);
+    context.lastComponent.setState(output, result.details, options.expanded, theme);
     return context.lastComponent;
   }
 

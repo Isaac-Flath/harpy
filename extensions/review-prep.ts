@@ -99,45 +99,45 @@ function formatReviewPrepCall(args: ReviewPrepInput, theme: Theme): string {
   return `${theme.fg("toolTitle", theme.bold("review_prep"))} ${flags.join(" ")}`.trim();
 }
 
-function renderAsLines(d: ReviewPrepDetails): string[] {
+function renderAsLines(d: ReviewPrepDetails, theme: Theme): string[] {
   const lines: string[] = [];
-  lines.push(`${bold("Base:")} ${d.resolvedBase} ${dim(`(requested: ${d.base})`)}`);
+  lines.push(`${bold(theme, "Base:")} ${d.resolvedBase} ${dim(theme, `(requested: ${d.base})`)}`);
 
   lines.push("");
-  lines.push(`${bold("Commits")} (${d.commits.length})`);
+  lines.push(`${bold(theme, "Commits")} (${d.commits.length})`);
   if (d.commits.length === 0) {
-    lines.push(dim("  (no commits ahead of base)"));
+    lines.push(dim(theme, "  (no commits ahead of base)"));
   } else {
     for (const c of d.commits) lines.push(`  ${c}`);
   }
 
   lines.push("");
-  lines.push(`${bold("Diffstat")} (${d.diffstat.length} files)`);
+  lines.push(`${bold(theme, "Diffstat")} (${d.diffstat.length} files)`);
   if (d.diffstat.length === 0) {
-    lines.push(dim("  (no diff)"));
+    lines.push(dim(theme, "  (no diff)"));
   } else {
-    for (const e of d.diffstat) lines.push(`  ${e.file}  ${dim(e.changes)}`);
-    if (d.diffstatSummary) lines.push(dim(`  ${d.diffstatSummary}`));
+    for (const e of d.diffstat) lines.push(`  ${e.file}  ${dim(theme, e.changes)}`);
+    if (d.diffstatSummary) lines.push(dim(theme, `  ${d.diffstatSummary}`));
   }
 
   if (d.includeDiff) {
     lines.push("");
-    lines.push(`${bold("Full diff")}`);
+    lines.push(`${bold(theme, "Full diff")}`);
     if (!d.fullDiff.trim()) {
-      lines.push(dim("  (empty)"));
+      lines.push(dim(theme, "  (empty)"));
     } else {
       for (const ln of d.fullDiff.split("\n")) lines.push(`  ${ln}`);
     }
     if (d.truncated) {
       lines.push(
-        dim(`  [truncated — re-run with a narrower base or fewer files]`)
+        dim(theme, `  [truncated — re-run with a narrower base or fewer files]`)
       );
     }
   }
 
   for (const note of d.notes) {
     lines.push("");
-    lines.push(dim(note));
+    lines.push(dim(theme, note));
   }
 
   return lines;
@@ -145,19 +145,23 @@ function renderAsLines(d: ReviewPrepDetails): string[] {
 
 class ReviewPrepComponent implements Component {
   private details: ReviewPrepDetails;
+  private theme: Theme;
   private expanded: boolean;
   private cachedLines: string[] | null = null;
   private cachedWidth = -1;
   private cachedExpanded = false;
 
-  constructor(details: ReviewPrepDetails, expanded: boolean) {
+  constructor(details: ReviewPrepDetails, expanded: boolean, theme: Theme) {
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
   }
 
-  setState(details: ReviewPrepDetails, expanded: boolean): void {
-    const changed = this.details !== details || this.expanded !== expanded;
+  setState(details: ReviewPrepDetails, expanded: boolean, theme: Theme): void {
+    const changed =
+      this.details !== details || this.theme !== theme || this.expanded !== expanded;
     this.details = details;
+    this.theme = theme;
     this.expanded = expanded;
     if (changed) this.cachedLines = null;
   }
@@ -182,7 +186,7 @@ class ReviewPrepComponent implements Component {
         ? ` — ${this.details.diffstatSummary}`
         : "";
       const lines = [
-        `${bold("review_prep")} ${dim(this.details.resolvedBase)}  ${dim(`${this.details.commits.length} commits, ${this.details.diffstat.length} files${summary}`)}`,
+        `${bold(this.theme, "review_prep")} ${dim(this.theme, this.details.resolvedBase)}  ${dim(this.theme, `${this.details.commits.length} commits, ${this.details.diffstat.length} files${summary}`)}`,
       ];
       this.cachedLines = lines.map((line) =>
         visibleWidth(line) > width ? truncateToWidth(line, width) : line
@@ -192,7 +196,7 @@ class ReviewPrepComponent implements Component {
       return this.cachedLines;
     }
 
-    const lines = renderAsLines(this.details);
+    const lines = renderAsLines(this.details, this.theme);
     this.cachedLines = wrapAnsiLines(lines, width);
     this.cachedWidth = width;
     this.cachedExpanded = this.expanded;
@@ -216,7 +220,7 @@ function reviewPrepRenderCall(
 function reviewPrepRenderResult(
   result: AgentToolResult<ReviewPrepDetails>,
   options: ToolRenderResultOptions,
-  _theme: Theme,
+  theme: Theme,
   context: { lastComponent: Component | undefined; isError: boolean }
 ): Component {
   if (context.isError || !result.details) {
@@ -229,11 +233,11 @@ function reviewPrepRenderResult(
   }
 
   if (context.lastComponent instanceof ReviewPrepComponent) {
-    context.lastComponent.setState(result.details, options.expanded);
+    context.lastComponent.setState(result.details, options.expanded, theme);
     return context.lastComponent;
   }
 
-  return new ReviewPrepComponent(result.details, options.expanded);
+  return new ReviewPrepComponent(result.details, options.expanded, theme);
 }
 
 // =============================================================================
