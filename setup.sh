@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Install harpy: dependencies, extensions, themes, and prompts.
+# Install harpy: dependencies, extensions, and prompts.
 # Run after cloning or when configs change.
 #
 set -euo pipefail
@@ -19,7 +19,11 @@ mkdir -p "$PI_DIR"
 ln -sfn "$REPO_DIR/prompts/APPEND_SYSTEM.md" "$PI_DIR/APPEND_SYSTEM.md"
 echo "linked: APPEND_SYSTEM.md"
 
-# Update settings.json: extensions and themes paths
+# Update settings.json: extensions and skills paths.
+# Skills: Pi only scans ~/.pi/agent/skills and .pi/skills by default, so we
+# point the settings "skills" array at ~/.agents/skills — the global discovery
+# directory that `agentkb skills link` maintains. agentkb owns the skill links;
+# Pi just reads the directory.
 SETTINGS="$PI_DIR/settings.json"
 if [ -f "$SETTINGS" ]; then
   # Use node to merge paths into existing settings
@@ -27,35 +31,36 @@ if [ -f "$SETTINGS" ]; then
     const fs = require('fs');
     const s = JSON.parse(fs.readFileSync('$SETTINGS', 'utf-8'));
     const extPath = '$REPO_DIR/extensions';
-    const themePath = '$REPO_DIR/themes';
+    const skillsPath = '$HOME/.agents/skills';
     if (!s.extensions) s.extensions = [];
     if (!s.extensions.includes(extPath)) s.extensions.push(extPath);
-    if (!s.themes) s.themes = [];
-    if (!s.themes.includes(themePath)) s.themes.push(themePath);
+    if (Array.isArray(s.themes)) {
+      s.themes = s.themes.filter((p) => p !== '$REPO_DIR/themes');
+      if (s.themes.length === 0) delete s.themes;
+    }
+    if (s.theme === 'ghostie') delete s.theme;
+    if (!s.skills) s.skills = [];
+    if (!s.skills.includes(skillsPath)) s.skills.push(skillsPath);
     fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
   "
 else
   cat > "$SETTINGS" <<SETTINGS
 {
   "extensions": ["$REPO_DIR/extensions"],
-  "themes": ["$REPO_DIR/themes"]
+  "skills": ["$HOME/.agents/skills"]
 }
 SETTINGS
 fi
 echo "updated: settings.json"
 
-# Symlink agentkb skills into Pi's skill discovery path
-SKILLS_SRC="$HOME/.agentkb/skills/.claude/skills"
-SKILLS_DST="$PI_DIR/skills"
-if [ -d "$SKILLS_SRC" ]; then
-  mkdir -p "$SKILLS_DST"
-  for skill in "$SKILLS_SRC"/*/; do
-    name="$(basename "$skill")"
-    ln -sfn "$skill" "$SKILLS_DST/$name"
-  done
-  echo "linked: agentkb skills"
-else
-  echo "skipped: agentkb skills (not found at $SKILLS_SRC)"
+if [ ! -d "$HOME/.agents/skills" ]; then
+  echo "note: ~/.agents/skills not found — run 'agentkb skills link' to populate it"
+fi
+
+# Remove dead skill symlinks left behind by older harpy setups
+# (they pointed at ~/.agentkb/skills/.claude/skills, which no longer exists).
+if [ -d "$PI_DIR/skills" ]; then
+  find "$PI_DIR/skills" -maxdepth 1 -type l ! -exec test -e {} \; -delete
 fi
 
 echo "done. restart pi to pick up changes."

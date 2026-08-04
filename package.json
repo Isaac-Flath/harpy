@@ -1,7 +1,7 @@
 {
   "name": "harpy",
   "version": "0.1.0",
-  "description": "Custom Pi coding agent extensions, prompts, and themes.",
+  "description": "Custom Pi coding agent extensions and prompts.",
   "type": "module",
   "private": true,
   "keywords": [
@@ -25,9 +25,6 @@
   "pi": {
     "extensions": [
       "./extensions"
-    ],
-    "themes": [
-      "./themes"
     ]
   },
   "scripts": {
