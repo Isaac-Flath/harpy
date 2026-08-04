@@ -1,4 +1,5 @@
 node_modules/
 dist/
+__pycache__/
 .scratchpad/
 .claude/settings.local.json

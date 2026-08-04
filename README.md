@@ -1,7 +1,7 @@
 # harpy
 
 Harpy is my personal [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) package.
-It bundles repo-local extensions, prompt additions, and a theme.
+It bundles repo-local extensions and prompt additions.
 
 Clone the repo, run `./setup.sh`, restart Pi, and Pi will load this checkout.
 
@@ -41,29 +41,30 @@ pi -p "List available tools" --no-session
 
 1. Installs npm dependencies.
 2. Symlinks `prompts/APPEND_SYSTEM.md` to `~/.pi/agent/APPEND_SYSTEM.md`.
-3. Adds this repo's `extensions/` and `themes/` directories to `~/.pi/agent/settings.json`.
-4. If `~/.agentkb/skills/.claude/skills` exists, symlinks those AgentKB skills into `~/.pi/agent/skills`.
+3. Adds this repo's `extensions/` directory to `~/.pi/agent/settings.json`.
+4. Points the `skills` path in `~/.pi/agent/settings.json` at `~/.agents/skills` (maintained by `agentkb skills link`) and removes dead skill symlinks left by older setups.
 
-Re-run `./setup.sh` after changing prompts, extensions, or themes.
+Re-run `./setup.sh` after changing prompts or extensions.
 
 ## What's included
 
 | Path | Purpose |
 |---|---|
-| `extensions/agentkb.ts` | Adds `kb_search`, `kb_read`, `kb_list`, `kb_chat_read`, and `kb_wiki_path` |
+| `extensions/agentkb.ts` | Adds `kb_search` (all AgentKB stores) and `kb_paths` (store paths for direct file access) |
 | `extensions/colgrep.ts` | Adds `colgrep` semantic + regex code search |
 | `extensions/git-dashboard.ts` | Adds `git_dashboard` for a one-call repo snapshot |
 | `extensions/review-prep.ts` | Adds `review_prep` for commits, diffstat, and diff |
 | `extensions/list-dir.ts` | Adds `list_dir` for recursive tree views |
 | `extensions/web.ts` | Adds `web_fetch` for web pages, YouTube transcripts, and PDFs |
 | `extensions/gemini.ts` | Adds `gemini` for PDF, image, and video analysis |
-| `extensions/think.ts` | Adds `think` for explicit planning steps |
+| `extensions/pyramid.ts` | Adds `pyramid` for Minto-pyramid communication: recommendations, plans, and argument structures, answer-first |
+| `extensions/subagent.ts` | Adds `subagent` for delegating tasks to agents defined in `agents/*.md` |
+| `agents/signal-librarian.md` | Demand-research subagent: compiles demand-evidence briefs from the AgentKB signal database |
 | `extensions/diff-view.ts` | Improves how `edit` and `write` diffs render |
 | `extensions/read-view.ts` | Improves collapsed summaries for `read` output |
 | `extensions/prevent-idle-sleep.ts` | Prevents macOS idle sleep with `caffeinate` |
 | `extensions/resume-last.ts` | Prints the exact `pi --session ...` command to resume the current session when Pi exits |
 | `prompts/APPEND_SYSTEM.md` | Extends the system prompt with AgentKB, colgrep, GitHub API, and Gemini guidance |
-| `themes/ghostie.json` | Adds a Ghostty-friendly light theme |
 
 ## Optional integrations
 
@@ -76,11 +77,8 @@ AgentKB-related tools depend on a local AgentKB install and local AgentKB data.
 That affects:
 
 - `kb_search`
-- `kb_read`
-- `kb_list`
-- `kb_chat_read`
-- `kb_wiki_path`
-- AgentKB skills linked into `~/.pi/agent/skills`
+- `kb_paths`
+- AgentKB skills discovered via `~/.agents/skills` (maintained by `agentkb skills link`)
 
 ### LLM fanout
 
@@ -129,7 +127,7 @@ pi -p "query" --no-session
 
 ## Who this is for
 
-Use this repo if you already use Pi and want a working set of extra tools, prompts, and themes without building everything yourself.
+Use this repo if you already use Pi and want a working set of extra tools and prompts without building everything yourself.
 
 If you want a polished starter kit, this is probably not it.
 The easiest way to borrow from Harpy is usually to point an agent at this repo and ask it to copy the parts you want into your own setup.
