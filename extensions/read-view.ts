@@ -25,6 +25,18 @@ interface ReadViewState {
   collapsedSummary?: ReadSummary;
 }
 
+/**
+ * A run of consecutive read calls (no other tool or assistant/user message in
+ * between). Members before the last render as nothing; the last member renders
+ * one aggregate line for the whole run. Ctrl+o expands rows individually.
+ */
+interface RunMember {
+  toolCallId: string;
+  args?: ReadToolInput;
+  summary?: ReadSummary;
+  invalidate?: () => void;
+}
+
 function getTextOutput(result: AgentToolResult<ReadToolDetails | undefined>): string {
   return result.content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -139,8 +151,55 @@ function renderCollapsedCall(
   return `${toolName} ${path} ${theme.fg(summary.tone, summary.text)}`;
 }
 
+function shortPath(path: unknown): string {
+  const text = getPathText(path);
+  const cwd = process.cwd() + "/";
+  return text.startsWith(cwd) ? text.slice(cwd.length) : text;
+}
+
+/** "lines 1-50 of 200" reads fine alone but is noise in a list — shorten to "1-50 of 200". */
+function shortSummaryText(summary: ReadSummary): string {
+  return summary.text.replace(/^lines /, "");
+}
+
+function renderGroupLine(run: RunMember[], theme: Theme): string {
+  const toolName = theme.fg("toolTitle", theme.bold("read"));
+  const count = theme.fg("dim", `${run.length} files:`);
+  const parts = run.map((member) => {
+    const path = theme.fg("accent", shortPath(member.args?.path));
+    return member.summary
+      ? `${path} ${theme.fg(member.summary.tone, `(${shortSummaryText(member.summary)})`)}`
+      : path;
+  });
+  return `${toolName} ${count} ${parts.join(theme.fg("dim", ", "))}`;
+}
+
 export default function (pi: ExtensionAPI) {
   const builtinRead = createReadToolDefinition(process.cwd());
+
+  let currentRun: RunMember[] = [];
+  const runByCallId = new Map<string, RunMember[]>();
+
+  pi.on("tool_execution_start", async (event) => {
+    if (event.toolName !== "read") {
+      currentRun = [];
+      return;
+    }
+    const member: RunMember = { toolCallId: event.toolCallId, args: event.args };
+    currentRun.push(member);
+    runByCallId.set(event.toolCallId, currentRun);
+    // The previous member no longer holds the aggregate line — re-render it.
+    if (currentRun.length > 1) {
+      currentRun[currentRun.length - 2]!.invalidate?.();
+    }
+  });
+
+  pi.on("message_start", async (event) => {
+    // toolResult messages arrive between reads of the same run; only real
+    // assistant/user messages break a run.
+    const role = (event.message as { role?: string }).role;
+    if (role === "assistant" || role === "user") currentRun = [];
+  });
 
   pi.registerTool({
     ...builtinRead,
@@ -150,13 +209,32 @@ export default function (pi: ExtensionAPI) {
       context: {
         lastComponent: Component | undefined;
         state: ReadViewState;
+        toolCallId: string;
+        expanded: boolean;
+        invalidate: () => void;
       }
     ): Component {
       const text =
         context.lastComponent instanceof Text
           ? context.lastComponent
           : new Text("", 0, 0);
-      text.setText(renderCollapsedCall(args, theme, context.state.collapsedSummary));
+
+      const run = runByCallId.get(context.toolCallId);
+      const member = run?.find((m) => m.toolCallId === context.toolCallId);
+      if (member) {
+        member.args = args;
+        member.invalidate = context.invalidate;
+      }
+
+      // Solo read, unknown call (e.g. resumed session), or expanded view:
+      // render the individual call line.
+      if (!run || !member || run.length === 1 || context.expanded) {
+        text.setText(renderCollapsedCall(args, theme, context.state.collapsedSummary));
+        return text;
+      }
+
+      const isLast = run[run.length - 1] === member;
+      text.setText(isLast ? renderGroupLine(run, theme) : "");
       return text;
     },
     renderResult(
@@ -168,6 +246,7 @@ export default function (pi: ExtensionAPI) {
         isError: boolean;
         args: ReadToolInput;
         state: ReadViewState;
+        toolCallId: string;
         invalidate: () => void;
       }
     ): Component {
@@ -182,6 +261,15 @@ export default function (pi: ExtensionAPI) {
       if (!previous || previous.text !== summary.text || previous.tone !== summary.tone) {
         context.state.collapsedSummary = summary;
         context.invalidate();
+      }
+
+      // In a run, the aggregate line lives on the run's last member — hand it
+      // this call's summary and re-render that row.
+      const run = runByCallId.get(context.toolCallId);
+      const member = run?.find((m) => m.toolCallId === context.toolCallId);
+      if (run && member && member.summary?.text !== summary.text) {
+        member.summary = summary;
+        (run[run.length - 1]!.invalidate ?? context.invalidate)();
       }
 
       const text =
