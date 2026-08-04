@@ -32,6 +32,7 @@ import {
   summarizeSingleLine,
   wrapAnsiLines,
 } from "./lib/render-text.js";
+import { checkAndRemember, duplicateStub, registerSeenResultsReset, resultKey } from "./lib/seen-results.js";
 
 // =============================================================================
 // Types
@@ -338,7 +339,14 @@ const kbSearchTool = defineTool({
         ? `    ${r.title}` + (r.section ? ` > ${r.section}` : "")
         : "";
       const tags = r.tags?.length ? `    Tags: ${r.tags.join(", ")}` : "";
-      return [header, title, tags, r.content ?? ""].filter(Boolean).join("\n");
+      // Exact repeats keep their header (the match itself is signal) but drop
+      // the body to avoid duplicating context.
+      let body = r.content ?? "";
+      if (body) {
+        const firstTool = checkAndRemember(resultKey(r.file, r.line, undefined, body), "kb_search");
+        if (firstTool) body = duplicateStub(firstTool);
+      }
+      return [header, title, tags, body].filter(Boolean).join("\n");
     });
 
     return {
@@ -406,4 +414,5 @@ export default function (pi: ExtensionAPI) {
   _pi = pi;
   pi.registerTool(kbSearchTool);
   pi.registerTool(kbPathsTool);
+  registerSeenResultsReset(pi);
 }

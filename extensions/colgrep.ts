@@ -18,6 +18,7 @@ import {
   summarizeSingleLine,
   wrapAnsiLines,
 } from "./lib/render-text.js";
+import { checkAndRemember, duplicateStub, registerSeenResultsReset, resultKey } from "./lib/seen-results.js";
 
 // =============================================================================
 // Types mirroring colgrep --json output
@@ -545,10 +546,25 @@ const colgrepTool = defineTool({
       );
     }
 
+    // Exact repeats (same file, range, and content — from any search tool)
+    // keep their header and signature but swap the code body for a stub, so
+    // repeated searches don't duplicate context.
+    const dedupedResults = results.map((r) => {
+      if (!r.unit.code) return r;
+      const firstTool = checkAndRemember(
+        // Absolute path so keys line up with kb_search's absolute file paths.
+        resultKey(nodePath.resolve(ctx.cwd, r.unit.file), r.unit.line, r.unit.end_line, r.unit.code),
+        "colgrep"
+      );
+      return firstTool
+        ? { ...r, unit: { ...r.unit, code: duplicateStub(firstTool) } }
+        : r;
+    });
+
     const details: ColgrepDetails = {
       ...baseDetails,
       mode: "json",
-      results,
+      results: dedupedResults,
       files: [],
     };
 
@@ -589,4 +605,5 @@ let _pi: ExtensionAPI;
 export default function (pi: ExtensionAPI) {
   _pi = pi;
   pi.registerTool(colgrepTool);
+  registerSeenResultsReset(pi);
 }
