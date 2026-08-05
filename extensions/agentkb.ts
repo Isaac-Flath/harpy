@@ -32,7 +32,7 @@ import {
   summarizeSingleLine,
   wrapAnsiLines,
 } from "./lib/render-text.js";
-import { checkAndRemember, duplicateStub, registerSeenResultsReset, resultKey } from "./lib/seen-results.js";
+import { checkAndRemember, registerSeenResultsReset, resultKey, seenPointer } from "./lib/seen-results.js";
 
 // =============================================================================
 // Types
@@ -59,6 +59,8 @@ interface KbSearchDetails {
   topK: number;
   pattern?: string;
   results: KbSearchResult[];
+  /** Pointer lines for previously-seen chunks skipped from this search. */
+  seenPointers: string[];
 }
 
 interface AgentkbSettingsPayload {
@@ -151,7 +153,7 @@ class KbSearchComponent implements Component {
       return this.cachedLines;
     }
 
-    const { query, scope, topK, pattern, results } = this.details;
+    const { query, scope, topK, pattern, results, seenPointers } = this.details;
 
     const lines: string[] = [
       bold(this.theme, "Search input"),
@@ -163,7 +165,7 @@ class KbSearchComponent implements Component {
 
     const displayPath = (r: KbSearchResult) => r.relative_path ?? r.file;
 
-    if (!results.length) {
+    if (!results.length && !seenPointers.length) {
       lines.push("", dim(this.theme, "No results found. Try broader terms or a different scope."));
     } else if (!this.expanded) {
       lines.push("", bold(this.theme, `Results (${results.length})`));
@@ -198,6 +200,11 @@ class KbSearchComponent implements Component {
           lines.push("", dim(this.theme, "  ───"), "");
         }
       }
+    }
+
+    if (seenPointers.length) {
+      lines.push("", dim(this.theme, `Skipped ${seenPointers.length} previously-seen:`));
+      for (const p of seenPointers) lines.push(dim(this.theme, `  ${p}`));
     }
 
     this.cachedLines = this.expanded
@@ -281,6 +288,7 @@ const kbSearchTool = defineTool({
     "Use kb_search for targeted lookups: 'does the KB mention X', 'find the page about Y'.",
     "Scopes: wiki for distilled knowledge (default), chats for session history, demand for audience questions, library for lessons/evidence/episodes, communications for researcher posts, everything for all stores.",
     "Result file paths are absolute — pass them to the read tool for full context around a hit.",
+    "Previously-returned chunks are deduped automatically: they appear as one-line `[seen #id]` pointers and don't count toward top_k, so every search returns new chunks. Re-read the file if you need a pointed-to chunk again.",
     "Use the pattern parameter for hybrid semantic+regex search when you know a specific identifier.",
     "For multi-step research, compose kb_search with SQL, file reads, and scripted LLM fanout (see the Primitives section of the system prompt).",
   ],
@@ -299,10 +307,13 @@ const kbSearchTool = defineTool({
 
     const scope = params.scope ?? "wiki";
     const topK = params.top_k ?? 3;
+    // Over-fetch so previously-seen chunks can be skipped without eating
+    // into top-k: the agent always gets up to topK NEW chunks.
+    const fetchK = topK * 3;
 
     const args: string[] = ["search"];
     if (params.scope) args.push("-s", params.scope);
-    args.push("-k", String(topK));
+    args.push("-k", String(fetchK));
     if (params.pattern) args.push("-e", params.pattern);
     args.push("-c", "--json");
     args.push(params.query);
@@ -312,16 +323,35 @@ const kbSearchTool = defineTool({
       args,
       signal
     );
-    const results = parsed.results ?? [];
+    const ranked = parsed.results ?? [];
+
+    // Walk results in rank order: keep the first topK unseen chunks; already
+    // seen chunks become one-line id-handle pointers and don't count.
+    const results: KbSearchResult[] = [];
+    const seenPointers: string[] = [];
+    for (const r of ranked) {
+      if (results.length >= topK) break;
+      const body = r.content ?? "";
+      const entry = body
+        ? checkAndRemember(resultKey(r.file, r.line, undefined, body), "kb_search")
+        : undefined;
+      if (entry) {
+        seenPointers.push(seenPointer(entry, `[${r.collection}] ${r.file}:${r.line}`));
+      } else {
+        results.push(r);
+      }
+    }
+
     const details: KbSearchDetails = {
       query: params.query,
       scope,
       topK,
       pattern: params.pattern,
       results,
+      seenPointers,
     };
 
-    if (results.length === 0) {
+    if (results.length === 0 && seenPointers.length === 0) {
       return {
         content: [
           {
@@ -339,18 +369,19 @@ const kbSearchTool = defineTool({
         ? `    ${r.title}` + (r.section ? ` > ${r.section}` : "")
         : "";
       const tags = r.tags?.length ? `    Tags: ${r.tags.join(", ")}` : "";
-      // Exact repeats keep their header (the match itself is signal) but drop
-      // the body to avoid duplicating context.
-      let body = r.content ?? "";
-      if (body) {
-        const firstTool = checkAndRemember(resultKey(r.file, r.line, undefined, body), "kb_search");
-        if (firstTool) body = duplicateStub(firstTool);
-      }
-      return [header, title, tags, body].filter(Boolean).join("\n");
+      return [header, title, tags, r.content ?? ""].filter(Boolean).join("\n");
     });
 
+    const sections: string[] = [];
+    if (formatted.length) sections.push(formatted.join("\n\n---\n\n"));
+    if (seenPointers.length) {
+      sections.push(
+        `Previously seen, skipped (not counted toward top-k):\n${seenPointers.map((p) => `  ${p}`).join("\n")}`
+      );
+    }
+
     return {
-      content: [{ type: "text", text: formatted.join("\n\n---\n\n") }],
+      content: [{ type: "text", text: sections.join("\n\n") }],
       details,
     };
   },

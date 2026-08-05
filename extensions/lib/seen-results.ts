@@ -1,8 +1,11 @@
 /**
- * Session-scoped registry of search-result snippets already returned to the
- * model. kb_search and colgrep share it (all extensions load in one process),
- * so an exact file+range+content repeat — within or across tools — can be
- * replaced with a one-line stub instead of duplicating context.
+ * Session-scoped registry of search-result chunks already returned to the
+ * model. kb_search and colgrep share it (all extensions load in one process).
+ *
+ * Dedupe contract: a chunk returned by any earlier search is never repeated.
+ * Instead the agent sees a one-line id-handle pointer, and the duplicate does
+ * NOT count toward top-k — callers over-fetch and backfill so every search
+ * returns top-k new, unseen chunks.
  *
  * The content hash in the key makes suppression safe: if a file changes
  * between searches, the hash differs and the full content is returned again.
@@ -10,7 +13,15 @@
 import { createHash } from "crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const seen = new Map<string, string>(); // key -> tool that first returned the snippet
+export interface SeenEntry {
+  /** Session-sequential id, shown to the agent as the pointer handle. */
+  id: number;
+  /** Tool that first returned the chunk. */
+  tool: string;
+}
+
+const seen = new Map<string, SeenEntry>(); // key -> first sighting
+let nextId = 1;
 
 export function resultKey(
   file: string,
@@ -23,18 +34,19 @@ export function resultKey(
 }
 
 /**
- * Returns the name of the tool that already returned this exact snippet, or
+ * Returns the entry recorded when this exact chunk was first returned, or
  * undefined if it is new (and records it under the given tool name).
  */
-export function checkAndRemember(key: string, tool: string): string | undefined {
+export function checkAndRemember(key: string, tool: string): SeenEntry | undefined {
   const first = seen.get(key);
   if (first) return first;
-  seen.set(key, tool);
+  seen.set(key, { id: nextId++, tool });
   return undefined;
 }
 
-export function duplicateStub(firstTool: string): string {
-  return `(unchanged — already returned by ${firstTool} earlier this session; re-read the file if needed)`;
+/** One-line pointer shown to the agent instead of a duplicated chunk. */
+export function seenPointer(entry: SeenEntry, location: string): string {
+  return `[seen #${entry.id}] ${location} — unchanged, already returned by ${entry.tool} this session; re-read the file if needed`;
 }
 
 /**
@@ -43,6 +55,12 @@ export function duplicateStub(firstTool: string): string {
  * from multiple extensions.
  */
 export function registerSeenResultsReset(pi: ExtensionAPI): void {
-  pi.on("session_start", async () => seen.clear());
-  pi.on("session_compact", async () => seen.clear());
+  pi.on("session_start", async () => {
+    seen.clear();
+    nextId = 1;
+  });
+  pi.on("session_compact", async () => {
+    seen.clear();
+    nextId = 1;
+  });
 }

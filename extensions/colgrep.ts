@@ -18,7 +18,7 @@ import {
   summarizeSingleLine,
   wrapAnsiLines,
 } from "./lib/render-text.js";
-import { checkAndRemember, duplicateStub, registerSeenResultsReset, resultKey } from "./lib/seen-results.js";
+import { checkAndRemember, registerSeenResultsReset, resultKey, seenPointer } from "./lib/seen-results.js";
 
 // =============================================================================
 // Types mirroring colgrep --json output
@@ -64,8 +64,13 @@ interface ColgrepDetails {
   commandLine: string;
   results: ColgrepResult[]; // empty when mode=files_only
   files: string[]; // populated when mode=files_only
+  /** Pointer lines for previously-seen chunks skipped from this search. */
+  seenPointers: string[];
   rawNote?: string;
 }
+
+/** colgrep's own default -k, used as the unseen-results target when the model omits top_k. */
+const COLGREP_DEFAULT_K = 25;
 
 // =============================================================================
 // Building the argv
@@ -210,7 +215,7 @@ function renderAsLines(d: ColgrepDetails, expanded: boolean, theme: Theme): stri
   lines.push("");
   lines.push(bold(theme, `Results (${d.results.length})`));
 
-  if (d.results.length === 0) {
+  if (d.results.length === 0 && d.seenPointers.length === 0) {
     lines.push(
       dim(theme, "  No matches. Try a broader semantic query or relax the regex.")
     );
@@ -241,6 +246,11 @@ function renderAsLines(d: ColgrepDetails, expanded: boolean, theme: Theme): stri
     if (i < d.results.length - 1) {
       lines.push("", dim(theme, "  ───"), "");
     }
+  }
+
+  if (d.seenPointers.length) {
+    lines.push("", dim(theme, `Skipped ${d.seenPointers.length} previously-seen:`));
+    for (const p of d.seenPointers) lines.push(dim(theme, `  ${p}`));
   }
 
   if (d.rawNote) {
@@ -437,6 +447,7 @@ const colgrepTool = defineTool({
     "Use `files_only: true` when you just need the list of matching files.",
     "Omit top_k and use the default; only raise it after a search that came back empty or clearly truncated.",
     "Use `model` or `alpha` only when the task explicitly needs search tuning.",
+    "Previously-returned chunks are deduped automatically: they appear as one-line `[seen #id]` pointers and don't count toward top_k, so every search returns new chunks. Re-read the file if you need a pointed-to chunk again.",
     "If one call returns nothing, try a broader `query` before running many narrow variants.",
     "colgrep cannot search files outside the current project's index. Use read/list_dir/bash for that.",
   ],
@@ -453,6 +464,12 @@ const colgrepTool = defineTool({
   ): Promise<AgentToolResult<ColgrepDetails>> {
     if (signal?.aborted) throw new Error("Operation aborted");
 
+    // Target number of NEW (unseen) chunks to return. Over-fetch so
+    // previously-seen chunks can be skipped without eating into top-k.
+    // files_only returns paths, not chunks — no dedupe, no over-fetch.
+    const targetK = params.top_k ?? COLGREP_DEFAULT_K;
+    const fetchK = params.files_only ? params.top_k : targetK * 3;
+
     const opts: BuildArgsOptions = {
       query: params.query,
       pattern: params.pattern,
@@ -460,7 +477,7 @@ const colgrepTool = defineTool({
       include: params.include,
       exclude: params.exclude,
       excludeDir: params.exclude_dir,
-      topK: params.top_k,
+      topK: fetchK,
       model: params.model,
       alpha: params.alpha,
       wholeWord: params.whole_word ?? false,
@@ -495,7 +512,7 @@ const colgrepTool = defineTool({
       include: opts.include,
       exclude: opts.exclude,
       excludeDir: opts.excludeDir,
-      topK: opts.topK,
+      topK: params.top_k,
       model: opts.model,
       alpha: opts.alpha,
       wholeWord: opts.wholeWord,
@@ -516,6 +533,7 @@ const colgrepTool = defineTool({
         mode: "files_only",
         results: [],
         files,
+        seenPointers: [],
       };
       const text = files.length
         ? `Matching files (${files.length}):\n${files.map((f) => `  ${f}`).join("\n")}`
@@ -547,26 +565,36 @@ const colgrepTool = defineTool({
       );
     }
 
-    // Exact repeats (same file, range, and content — from any search tool)
-    // keep their header and signature but swap the code body for a stub, so
-    // repeated searches don't duplicate context.
-    const dedupedResults = results.map((r) => {
-      if (!r.unit.code) return r;
-      const firstTool = checkAndRemember(
+    // Walk results in rank order: keep the first targetK unseen chunks
+    // (same file, range, and content — from any search tool); already seen
+    // chunks become one-line id-handle pointers and don't count toward top-k.
+    const unseenResults: ColgrepResult[] = [];
+    const seenPointers: string[] = [];
+    for (const r of results) {
+      if (unseenResults.length >= targetK) break;
+      if (!r.unit.code) {
+        unseenResults.push(r);
+        continue;
+      }
+      const entry = checkAndRemember(
         // Absolute path so keys line up with kb_search's absolute file paths.
         resultKey(nodePath.resolve(ctx.cwd, r.unit.file), r.unit.line, r.unit.end_line, r.unit.code),
         "colgrep"
       );
-      return firstTool
-        ? { ...r, unit: { ...r.unit, code: duplicateStub(firstTool) } }
-        : r;
-    });
+      if (entry) {
+        const loc = `${r.unit.file}:${r.unit.line}${r.unit.end_line && r.unit.end_line !== r.unit.line ? `-${r.unit.end_line}` : ""}`;
+        seenPointers.push(seenPointer(entry, loc));
+      } else {
+        unseenResults.push(r);
+      }
+    }
 
     const details: ColgrepDetails = {
       ...baseDetails,
       mode: "json",
-      results: dedupedResults,
+      results: unseenResults,
       files: [],
+      seenPointers,
     };
 
     const text = buildTextOutput(details);
@@ -578,7 +606,7 @@ const colgrepTool = defineTool({
 });
 
 function buildTextOutput(d: ColgrepDetails): string {
-  if (d.results.length === 0) {
+  if (d.results.length === 0 && d.seenPointers.length === 0) {
     return "No matches. Try a broader semantic query or relax the regex.";
   }
   const sections = d.results.map((r, i) => {
@@ -594,6 +622,11 @@ function buildTextOutput(d: ColgrepDetails): string {
     const code = u.code ? `\n${u.code}` : "";
     return [header, name, signature].filter(Boolean).join("\n") + code;
   });
+  if (d.seenPointers.length) {
+    sections.push(
+      `Previously seen, skipped (not counted toward top-k):\n${d.seenPointers.map((p) => `  ${p}`).join("\n")}`
+    );
+  }
   return sections.join("\n\n---\n\n");
 }
 
