@@ -384,7 +384,7 @@ const colgrepSchema = Type.Object({
   alpha: Type.Optional(
     Type.Number({
       description:
-        "Hybrid search alpha between keyword (0.0) and semantic (1.0) scoring (--alpha). Default: colgrep default, 0.75.",
+        "Hybrid search alpha between keyword (0.0) and semantic (1.0) scoring (--alpha). Default: colgrep default, 0.60.",
       minimum: 0,
       maximum: 1,
     })

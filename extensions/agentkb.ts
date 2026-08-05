@@ -256,7 +256,7 @@ const searchSchema = Type.Object({
   ),
   top_k: Type.Optional(
     Type.Number({
-      description: "Number of results to return (default: 5)",
+      description: "Number of results to return (default: 3)",
     })
   ),
   pattern: Type.Optional(
@@ -277,10 +277,10 @@ const kbSearchTool = defineTool({
   promptSnippet:
     "Search accumulated knowledge: lessons, corrections, preferences, gotchas, demand signals",
   promptGuidelines: [
-    "Use kb_search for targeted lookups: 'does the KB mention X', 'find the page about Y', one-shot sanity checks.",
+    "Only search the KB when the user asks for it — never proactively or as background research.",
+    "Use kb_search for targeted lookups: 'does the KB mention X', 'find the page about Y'.",
     "Scopes: wiki for distilled knowledge (default), chats for session history, demand for audience questions, library for lessons/evidence/episodes, communications for researcher posts, everything for all stores.",
     "Result file paths are absolute — pass them to the read tool for full context around a hit.",
-    "Search after the user corrects you or expresses a preference — there may be related guidance already recorded.",
     "Use the pattern parameter for hybrid semantic+regex search when you know a specific identifier.",
     "For multi-step research, compose kb_search with SQL, file reads, and scripted LLM fanout (see the Primitives section of the system prompt).",
   ],
@@ -298,7 +298,7 @@ const kbSearchTool = defineTool({
     if (signal?.aborted) throw new Error("Operation aborted");
 
     const scope = params.scope ?? "wiki";
-    const topK = params.top_k ?? 5;
+    const topK = params.top_k ?? 3;
 
     const args: string[] = ["search"];
     if (params.scope) args.push("-s", params.scope);

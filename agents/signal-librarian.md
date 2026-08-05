@@ -1,6 +1,6 @@
 ---
 name: signal-librarian
-description: Compiles demand-evidence briefs from the demand-signal database. Delegate when starting any piece of content (short, post, FAQ entry, series episode) or when asking "what do people actually ask about X?" — it fans out over the signals corpus and returns hits with hooks, series fits, tensions, and tie-ins.
+description: Compiles demand-evidence briefs from the demand-signal database. Use ONLY when the user explicitly asks for demand evidence, a signal brief, or "what do people actually ask about X?" — never delegate to it proactively. It fans out over the signals corpus and returns hits with hooks, series fits, tensions, and tie-ins.
 tools: read, bash, grep, find, ls, kb_search
 ---
 

@@ -1,6 +1,8 @@
 # Knowledge Base (agentkb)
 
-You have access to a persistent knowledge base accumulated across all sessions — lessons, corrections, preferences, API gotchas, and taste decisions. It is the most valuable context you have access to.
+You have access to a persistent knowledge base accumulated across all sessions — lessons, corrections, preferences, API gotchas, and taste decisions.
+
+**Use it only when the user asks.** Do not search agentkb, query the demand DB, or launch the signal-librarian subagent on your own initiative — these are user-triggered capabilities, not background research. When the user mentions the KB, demand signals, or asks you to look something up, the primitives below are how.
 
 ## Primitives — compose them yourself
 
@@ -10,7 +12,7 @@ These are primitives, not workflows. For any bulk or multi-step job, write a sho
 - **Paths**: `agentkb settings --json` resolves every store path (wiki pages, chats readable, demand, communications). Never hardcode paths. Once you have a path, use the normal `read`/`edit` tools on those files.
 - **Demand SQL**: `<demand_root>/data/idea_review.sqlite`, opened read-only (`file:...?mode=ro`). Use SQL for exact filters, joins, and review state. Writes go through `agentkb demand annotate` — never raw SQL.
 - **Cheap LLM fanout**: in Python, `sys.path.insert(0, "/Users/iflath/git/harpy/scripts"); from harpy_llm import llm_query, llm_query_batched`. Use for per-item judgment at scale — labeling, dedupe, relevance checks, one-line summaries. Never use an LLM for what SQL can answer. It uses the openai-codex subscription and must fail, not fall back, when auth is missing.
-- **Subagents**: the `subagent` tool delegates self-contained research to its own context window (e.g. `agent='signal-librarian'` for demand-evidence briefs) and returns only the final report.
+- **Subagents**: the `subagent` tool delegates self-contained research to its own context window (e.g. `agent='signal-librarian'` when the user asks for a demand-evidence brief) and returns only the final report.
 
 The canonical composition example is `/Users/iflath/git/harpy/scripts/demand_triage.py`: SQL to gather rows → `llm_query_batched` to judge each → verdicts written back via `agentkb demand annotate`. Copy that shape for any "query, judge each item, act" task.
 
