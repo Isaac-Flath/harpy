@@ -373,7 +373,7 @@ const colgrepSchema = Type.Object({
     })
   ),
   top_k: Type.Optional(
-    Type.Number({ description: "Number of results (default: colgrep default, 15)." })
+    Type.Number({ description: "Number of results (default: colgrep default, 25)." })
   ),
   model: Type.Optional(
     Type.String({
@@ -435,6 +435,7 @@ const colgrepTool = defineTool({
     "`pattern` is ONE regex, not a pipe-separated keyword list. For several keywords, put them in `query`. For alternation, use a real regex group like `(auth|login|signin)`.",
     "Use `paths` to scope to specific files/directories, `include` to filter by extension, `exclude`/`exclude_dir` to skip noise.",
     "Use `files_only: true` when you just need the list of matching files.",
+    "Omit top_k and use the default; only raise it after a search that came back empty or clearly truncated.",
     "Use `model` or `alpha` only when the task explicitly needs search tuning.",
     "If one call returns nothing, try a broader `query` before running many narrow variants.",
     "colgrep cannot search files outside the current project's index. Use read/list_dir/bash for that.",
