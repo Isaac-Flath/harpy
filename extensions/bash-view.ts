@@ -1,149 +1,63 @@
-/**
- * Compact rendering for the built-in bash tool.
- *
- * Collapsed bash output is noise while the agent works: osascript calls,
- * installs, test runs. This view shrinks each call to a single line —
- * `bash <command> ✓ N lines` — with a one-line live tail while running.
- * Errors and expanded view (ctrl+o) fall through to the full built-in
- * rendering, same pattern as read-view.ts.
- */
-import {
-  createBashToolDefinition,
-  type AgentToolResult,
-  type BashToolDetails,
-  type BashToolInput,
-  type ExtensionAPI,
-  type ToolRenderResultOptions,
-} from "@earendil-works/pi-coding-agent";
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
+/** Compact bash display only; the active tool still owns execution and output. */
+import type { BashToolDetails, ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { RendererDelegate, textOutput, type RenderContext, type Summary } from "./lib/compact-render.js";
 import { summarizeSingleLine } from "./lib/render-text.js";
 
-const COMMAND_MAX = 72;
-
-type SummaryTone = "success" | "warning" | "dim";
-
-interface BashSummary {
-  text: string;
-  tone: SummaryTone;
-}
-
 interface BashViewState {
-  collapsedSummary?: BashSummary;
+  call: Text;
+  result: Text;
+  delegate: RendererDelegate;
+  summary?: Summary;
 }
 
-function getTextOutput(result: AgentToolResult<BashToolDetails | undefined>): string {
-  return result.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-}
-
-function countLines(output: string): number {
-  const trimmed = output.replace(/\r/g, "").replace(/\n+$/, "");
-  return trimmed ? trimmed.split("\n").length : 0;
-}
-
-function lastNonEmptyLine(output: string): string {
-  const lines = output.replace(/\r/g, "").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!.trim();
-    if (line) return line;
-  }
-  return "";
-}
-
-function summarizeBashResult(
-  result: AgentToolResult<BashToolDetails | undefined>
-): BashSummary {
-  const lineCount = countLines(getTextOutput(result));
-  if (lineCount === 0) return { text: "no output", tone: "dim" };
-
-  const truncated = result.details?.truncation?.truncated ? ", truncated" : "";
-  return {
-    text: `✓ ${lineCount} line${lineCount === 1 ? "" : "s"}${truncated}`,
-    tone: "success",
+function stateFor(context: RenderContext): BashViewState {
+  return context.state.harpyBashView ??= {
+    call: new Text("", 0, 0), result: new Text("", 0, 0), delegate: new RendererDelegate(),
   };
 }
 
-function renderCallLine(
-  args: Partial<BashToolInput> | undefined,
-  theme: Theme,
-  summary: BashSummary | undefined
-): string {
-  const toolName = theme.fg("toolTitle", theme.bold("bash"));
-  const command = args?.command
-    ? theme.fg("dim", summarizeSingleLine(args.command, COMMAND_MAX))
-    : "";
-  const status = summary ? ` ${theme.fg(summary.tone, summary.text)}` : "";
-  return `${toolName} ${command}${status}`;
+function header(args: unknown, theme: Theme, summary?: Summary): string {
+  const input = args && typeof args === "object" ? args as { command?: unknown } : {};
+  const command = typeof input.command === "string" ? summarizeSingleLine(input.command, 72) : "...";
+  return `${theme.fg("toolTitle", theme.bold("bash"))} ${theme.fg("dim", command)}` +
+    (summary ? ` ${theme.fg(summary.tone, summary.text)}` : "");
 }
 
 export default function (pi: ExtensionAPI) {
-  const builtinBash = createBashToolDefinition(process.cwd());
-
-  pi.registerTool({
-    ...builtinBash,
-    renderCall(
-      args: BashToolInput,
-      theme: Theme,
-      context: { lastComponent: Component | undefined; state: BashViewState }
-    ): Component {
-      const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
-      text.setText(renderCallLine(args, theme, context.state?.collapsedSummary));
-      return text;
-    },
-    renderResult(
-      result: AgentToolResult<BashToolDetails | undefined>,
-      options: ToolRenderResultOptions,
-      theme: Theme,
-      context: {
-        lastComponent: Component | undefined;
-        isError: boolean;
-        args: BashToolInput;
-        state: BashViewState;
-        invalidate: () => void;
-      }
-    ): Component {
-      // Failures and expanded view get the full built-in rendering.
-      if (context.isError || options.expanded) {
-        return builtinBash.renderResult
-          ? builtinBash.renderResult(result, options, theme, context as any)
-          : (() => {
-              const text =
-                context.lastComponent instanceof Text
-                  ? context.lastComponent
-                  : new Text("", 0, 0);
-              text.setText(getTextOutput(result));
-              return text;
-            })();
-      }
-
-      const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
-
-      // While running: a one-line live tail instead of a scrolling preview.
-      if (options.isPartial) {
-        const tail = lastNonEmptyLine(getTextOutput(result));
-        text.setText(tail ? theme.fg("dim", `  ${summarizeSingleLine(tail, COMMAND_MAX)}`) : "");
-        return text;
-      }
-
-      // Complete + collapsed: move the summary up onto the call line.
-      const summary = summarizeBashResult(result);
-      const previous = context.state.collapsedSummary;
-      if (!previous || previous.text !== summary.text || previous.tone !== summary.tone) {
-        context.state.collapsedSummary = summary;
-        context.invalidate();
-      }
-      text.setText("");
-      return text;
-    },
+  pi.registerToolRenderer((name, next) => {
+    const base = next();
+    if (name !== "bash") return base;
+    return {
+      ...base,
+      renderCall(args, theme, context) {
+        const state = stateFor(context);
+        if (context.expanded || context.isError) {
+          return state.delegate.call(base, args, theme, context, header(args, theme));
+        }
+        state.call.setText(header(args, theme, context.isPartial ? undefined : state.summary));
+        return state.call;
+      },
+      renderResult(result, options, theme, context) {
+        const state = stateFor(context);
+        const output = textOutput(result).replace(/\r/g, "");
+        const trimmed = output.replace(/\n+$/, "");
+        const lines = trimmed ? trimmed.split("\n").length : 0;
+        const truncated = (result.details as BashToolDetails | undefined)?.truncation?.truncated;
+        state.summary = context.isError || options.isPartial ? undefined : {
+          text: `${lines ? `✓ ${lines} line${lines === 1 ? "" : "s"}` : "no output"}${truncated ? ", truncated" : ""}`,
+          tone: truncated ? "warning" : lines ? "success" : "dim",
+        };
+        // Update the already-mounted header without recursively invalidating the row.
+        state.call.setText(header(context.args, theme, state.summary));
+        if (context.isError || options.expanded) return state.delegate.result(base, result, theme, context);
+        // If expanded while streaming, the native renderer may have started a
+        // timer. Keep it informed (especially of final results) after collapse.
+        if (state.delegate.used) state.delegate.result(base, result, theme, context);
+        const tail = output.trimEnd().split("\n").pop()?.trim();
+        state.result.setText(options.isPartial && tail ? theme.fg("dim", `  ${summarizeSingleLine(tail, 72)}`) : "");
+        return state.result;
+      },
+    };
   });
 }

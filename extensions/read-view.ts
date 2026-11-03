@@ -1,283 +1,165 @@
-import {
-  createReadToolDefinition,
-  type AgentToolResult,
-  type ExtensionAPI,
-  type ReadToolDetails,
-  type ReadToolInput,
-  type ToolRenderResultOptions,
-} from "@earendil-works/pi-coding-agent";
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
+/** Compact reads, grouping only successful text reads from a live contiguous run.
+ * Errors, images, pending/expanded rows and resumed history remain individual. */
+import type { AgentToolResult, ExtensionAPI, ReadToolDetails, ReadToolInput, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { isAbsolute, relative, sep } from "node:path";
+import { RendererDelegate, textOutput, type RenderContext, type Summary } from "./lib/compact-render.js";
 
-const SHOWING_LINES_RE = /^\[Showing lines (\d+)-(\d+) of (\d+).+\]$/;
-const MORE_LINES_RE = /^\[(\d+) more lines in file\. Use offset=(\d+) to continue\.\]$/;
-const OVERSIZE_LINE_RE = /^\[Line (\d+) is .+ exceeds .+ limit.+\]$/;
-
-type SummaryTone = "success" | "warning" | "dim";
-
-interface ReadSummary {
-  text: string;
-  tone: SummaryTone;
-}
-
-interface ReadViewState {
-  collapsedSummary?: ReadSummary;
-}
-
-/**
- * A run of consecutive read calls (no other tool or assistant/user message in
- * between). Members before the last render as nothing; the last member renders
- * one aggregate line for the whole run. Ctrl+o expands rows individually.
- */
-interface RunMember {
-  toolCallId: string;
-  args?: ReadToolInput;
-  summary?: ReadSummary;
+interface Member {
+  group: Member[];
+  epoch: number;
+  view?: ReadView;
   invalidate?: () => void;
+  refreshPending?: boolean;
+}
+interface ReadView {
+  call: Text;
+  result: Text;
+  delegate: RendererDelegate;
+  epoch: number;
+  args: Partial<ReadToolInput>;
+  cwd: string;
+  expanded: boolean;
+  partial: boolean;
+  error: boolean;
+  image: boolean;
+  summary?: Summary;
+  member?: Member;
 }
 
-function getTextOutput(result: AgentToolResult<ReadToolDetails | undefined>): string {
-  return result.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-}
-
-function renderFallbackText(
-  result: AgentToolResult<ReadToolDetails | undefined>,
-  context: { lastComponent: Component | undefined }
-): Component {
-  const text =
-    context.lastComponent instanceof Text
-      ? context.lastComponent
-      : new Text("", 0, 0);
-  text.setText(getTextOutput(result));
-  return text;
-}
-
-function getPathText(path: unknown): string {
-  return typeof path === "string" && path.length > 0 ? path : "...";
-}
-
-function countDisplayedLines(text: string): number {
-  const normalized = text.replace(/\r/g, "");
-  if (!normalized) return 0;
-  const segments = normalized.split("\n");
-  return normalized.endsWith("\n") ? Math.max(0, segments.length - 1) : segments.length;
-}
-
-function summarizeReadResult(
-  args: ReadToolInput,
-  result: AgentToolResult<ReadToolDetails | undefined>
-): ReadSummary {
-  if (result.content.some((c) => c.type === "image")) {
-    return { text: "image loaded", tone: "success" };
-  }
-
-  const output = getTextOutput(result);
-  if (!output.trim()) {
-    return { text: "empty file", tone: "dim" };
-  }
-
-  const rawLines = output.replace(/\r/g, "").split("\n");
-  let lastNonEmpty = rawLines.length - 1;
-  while (lastNonEmpty >= 0 && rawLines[lastNonEmpty] === "") {
-    lastNonEmpty--;
-  }
-
-  const tail = lastNonEmpty >= 0 ? rawLines[lastNonEmpty]!.trim() : "";
-
-  const oversize = tail.match(OVERSIZE_LINE_RE);
-  if (oversize) {
-    return {
-      text: `line ${oversize[1]} exceeds the read size limit`,
-      tone: "warning",
-    };
-  }
-
-  const showing = tail.match(SHOWING_LINES_RE);
-  if (showing) {
-    return {
-      text: `lines ${showing[1]}-${showing[2]} of ${showing[3]}`,
-      tone: "success",
-    };
-  }
-
-  const more = tail.match(MORE_LINES_RE);
+function summarize(args: Partial<ReadToolInput>, result: AgentToolResult<unknown>): Summary {
+  if (result.content.some((c) => c.type === "image")) return { text: "image loaded", tone: "success" };
+  const output = textOutput(result).replace(/\r/g, "");
+  if (!output) return { text: "empty file", tone: "dim" };
+  const tail = output.trimEnd().split("\n").pop()?.trim() ?? "";
+  const oversize = /^\[Line (\d+) is .+ exceeds .+ limit.+\]$/.exec(tail);
+  if (oversize) return { text: `line ${oversize[1]} exceeds the read size limit`, tone: "warning" };
+  const showing = /^\[Showing lines (\d+)-(\d+) of (\d+).+\]$/.exec(tail);
+  if (showing) return { text: `lines ${showing[1]}-${showing[2]} of ${showing[3]}`, tone: "warning" };
+  const start = typeof args.offset === "number" ? args.offset : 1;
+  const more = /^\[(\d+) more lines in file\. Use offset=(\d+) to continue\.\]$/.exec(tail);
   if (more) {
-    const remaining = Number(more[1]);
-    const nextOffset = Number(more[2]);
-    const startLine = args.offset ?? 1;
-    const endLine = Math.max(startLine, nextOffset - 1);
-    const totalLines = endLine + remaining;
-    return {
-      text: `lines ${startLine}-${endLine} of ${totalLines}`,
-      tone: "success",
-    };
+    const end = Math.max(start, Number(more[2]) - 1);
+    return { text: `lines ${start}-${end} of ${end + Number(more[1])}`, tone: "success" };
   }
-
-  const lineCount = countDisplayedLines(output);
-  if (lineCount === 0) {
-    return { text: "empty file", tone: "dim" };
-  }
-
-  const startLine = args.offset ?? 1;
-  const endLine = startLine + lineCount - 1;
-  const totalLines = result.details?.truncation?.totalLines;
-
-  if (totalLines && totalLines > endLine) {
-    return {
-      text: `lines ${startLine}-${endLine} of ${totalLines}`,
-      tone: "success",
-    };
-  }
-
-  return { text: `lines ${startLine}-${endLine}`, tone: "success" };
+  const count = output.split("\n").length - Number(output.endsWith("\n"));
+  const truncation = (result.details as ReadToolDetails | undefined)?.truncation;
+  const end = start + count - 1;
+  return {
+    text: `lines ${start}-${end}${truncation?.totalLines && truncation.totalLines > end ? ` of ${truncation.totalLines}` : ""}`,
+    tone: truncation?.truncated ? "warning" : "success",
+  };
 }
 
-function renderCollapsedCall(
-  args: ReadToolInput,
-  theme: Theme,
-  summary: ReadSummary | undefined
-): string {
-  const toolName = theme.fg("toolTitle", theme.bold("read"));
-  const path = theme.fg("accent", getPathText(args.path));
-
-  if (!summary) {
-    return `${toolName} ${path}`;
-  }
-
-  return `${toolName} ${path} ${theme.fg(summary.tone, summary.text)}`;
-}
-
-function shortPath(path: unknown): string {
-  const text = getPathText(path);
-  const cwd = process.cwd() + "/";
-  return text.startsWith(cwd) ? text.slice(cwd.length) : text;
-}
-
-/** "lines 1-50 of 200" reads fine alone but is noise in a list — shorten to "1-50 of 200". */
-function shortSummaryText(summary: ReadSummary): string {
-  return summary.text.replace(/^lines /, "");
-}
-
-function renderGroupLine(run: RunMember[], theme: Theme): string {
-  const toolName = theme.fg("toolTitle", theme.bold("read"));
-  const count = theme.fg("dim", `${run.length} files:`);
-  const parts = run.map((member) => {
-    const path = theme.fg("accent", shortPath(member.args?.path));
-    return member.summary
-      ? `${path} ${theme.fg(member.summary.tone, `(${shortSummaryText(member.summary)})`)}`
-      : path;
-  });
-  return `${toolName} ${count} ${parts.join(theme.fg("dim", ", "))}`;
+function pathText(view: ReadView): string {
+  const path = typeof view.args.path === "string" ? view.args.path : "...";
+  if (!isAbsolute(path)) return path;
+  const local = relative(view.cwd, path);
+  return local && local !== ".." && !local.startsWith(`..${sep}`) && !isAbsolute(local) ? local : path;
 }
 
 export default function (pi: ExtensionAPI) {
-  const builtinRead = createReadToolDefinition(process.cwd());
-
-  let currentRun: RunMember[] = [];
-  const runByCallId = new Map<string, RunMember[]>();
-
-  pi.on("tool_execution_start", async (event) => {
-    if (event.toolName !== "read") {
-      currentRun = [];
-      return;
-    }
-    const member: RunMember = { toolCallId: event.toolCallId, args: event.args };
-    currentRun.push(member);
-    runByCallId.set(event.toolCallId, currentRun);
-    // The previous member no longer holds the aggregate line — re-render it.
-    if (currentRun.length > 1) {
-      currentRun[currentRun.length - 2]!.invalidate?.();
-    }
+  let epoch = 0;
+  let current: Member[] = [];
+  // Only unbound live calls live in this map. Once a row renders, it owns its
+  // membership; completed off-screen calls and session changes release entries.
+  const pending = new Map<string, Member>();
+  const reset = () => { epoch++; current = []; pending.clear(); };
+  pi.on("session_start", reset);
+  pi.on("session_shutdown", reset);
+  pi.on("session_tree", reset);
+  pi.on("message_start", ({ message }) => {
+    if (message.role === "user" || message.role === "assistant") current = [];
   });
-
-  pi.on("message_start", async (event) => {
-    // toolResult messages arrive between reads of the same run; only real
-    // assistant/user messages break a run.
-    const role = (event.message as { role?: string }).role;
-    if (role === "assistant" || role === "user") currentRun = [];
+  pi.on("tool_execution_start", (event) => {
+    if (event.parentToolCallId) return; // Nested tools have no independent transcript row.
+    if (event.toolName !== "read") { current = []; return; }
+    const member: Member = { group: current, epoch };
+    current.push(member);
+    pending.set(event.toolCallId, member);
   });
+  pi.on("tool_execution_end", (event) => { pending.delete(event.toolCallId); });
 
-  pi.registerTool({
-    ...builtinRead,
-    renderCall(
-      args: ReadToolInput,
-      theme: Theme,
-      context: {
-        lastComponent: Component | undefined;
-        state: ReadViewState;
-        toolCallId: string;
-        expanded: boolean;
-        invalidate: () => void;
-      }
-    ): Component {
-      const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
+  function eligible(view: ReadView): boolean {
+    return view.epoch === epoch && Boolean(view.summary) && !view.expanded && !view.partial && !view.error && !view.image;
+  }
 
-      const run = runByCallId.get(context.toolCallId);
-      const member = run?.find((m) => m.toolCallId === context.toolCallId);
-      if (member) {
-        member.args = args;
-        member.invalidate = context.invalidate;
-      }
+  function refreshOthers(member: Member | undefined): void {
+    if (!member || member.epoch !== epoch) return;
+    for (const other of member.group) {
+      if (other === member || !other.invalidate || other.refreshPending) continue;
+      other.refreshPending = true;
+      // Pi's invalidate() rebuilds the row synchronously. Defer cross-row updates
+      // to avoid reentrant tool rendering while a result is being mounted.
+      queueMicrotask(() => {
+        other.refreshPending = false;
+        if (other.epoch === epoch) other.invalidate?.();
+      });
+    }
+  }
 
-      // Solo read, unknown call (e.g. resumed session), or expanded view:
-      // render the individual call line.
-      if (!run || !member || run.length === 1 || context.expanded) {
-        text.setText(renderCollapsedCall(args, theme, context.state.collapsedSummary));
-        return text;
-      }
+  function stateFor(args: unknown, context: RenderContext): ReadView {
+    const state: ReadView = context.state.harpyReadView ??= {
+      call: new Text("", 0, 0), result: new Text("", 0, 0), delegate: new RendererDelegate(),
+      epoch, args: {}, cwd: context.cwd, expanded: false, partial: true, error: false, image: false,
+    };
+    const wasEligible = eligible(state);
+    if (state.epoch === epoch && !state.member) {
+      state.member = pending.get(context.toolCallId);
+      if (state.member) { state.member.view = state; pending.delete(context.toolCallId); }
+    }
+    if (state.member) state.member.invalidate = context.invalidate;
+    state.args = args && typeof args === "object" ? args as Partial<ReadToolInput> : {};
+    state.cwd = context.cwd;
+    state.expanded = context.expanded;
+    state.partial = context.isPartial;
+    state.error = context.isError;
+    if (wasEligible !== eligible(state)) refreshOthers(state.member);
+    return state;
+  }
 
-      const isLast = run[run.length - 1] === member;
-      text.setText(isLast ? renderGroupLine(run, theme) : "");
-      return text;
-    },
-    renderResult(
-      result: AgentToolResult<ReadToolDetails | undefined>,
-      options: ToolRenderResultOptions,
-      theme: Theme,
-      context: {
-        lastComponent: Component | undefined;
-        isError: boolean;
-        args: ReadToolInput;
-        state: ReadViewState;
-        toolCallId: string;
-        invalidate: () => void;
-      }
-    ): Component {
-      if (context.isError || options.expanded || options.isPartial) {
-        return builtinRead.renderResult
-          ? builtinRead.renderResult(result, options, theme, context as any)
-          : renderFallbackText(result, context);
-      }
+  function header(state: ReadView, theme: Theme): string {
+    const title = theme.fg("toolTitle", theme.bold("read"));
+    const group = state.member?.group.filter((m) => m.view && eligible(m.view)) ?? [];
+    if (eligible(state) && group.length > 1) {
+      if (group.at(-1) !== state.member) return "";
+      const views = group.map((m) => m.view!);
+      const files = new Set(views.map(pathText)).size;
+      const parts = views.map((view) => `${theme.fg("accent", pathText(view))} ${theme.fg(view.summary!.tone, `(${view.summary!.text.replace(/^lines /, "")})`)}`);
+      return `${title} ${theme.fg("dim", `${files} file${files === 1 ? "" : "s"}:`)} ${parts.join(theme.fg("dim", ", "))}`;
+    }
+    const summary = !state.partial && !state.error ? state.summary : undefined;
+    return `${title} ${theme.fg("accent", pathText(state))}${summary ? ` ${theme.fg(summary.tone, summary.text)}` : ""}`;
+  }
 
-      const summary = summarizeReadResult(context.args, result);
-      const previous = context.state.collapsedSummary;
-      if (!previous || previous.text !== summary.text || previous.tone !== summary.tone) {
-        context.state.collapsedSummary = summary;
-        context.invalidate();
-      }
-
-      // In a run, the aggregate line lives on the run's last member — hand it
-      // this call's summary and re-render that row.
-      const run = runByCallId.get(context.toolCallId);
-      const member = run?.find((m) => m.toolCallId === context.toolCallId);
-      if (run && member && member.summary?.text !== summary.text) {
-        member.summary = summary;
-        (run[run.length - 1]!.invalidate ?? context.invalidate)();
-      }
-
-      const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
-      text.setText("");
-      return text;
-    },
+  pi.registerToolRenderer((name, next) => {
+    const base = next();
+    if (name !== "read") return base;
+    return {
+      ...base,
+      renderCall(args, theme, context) {
+        const state = stateFor(args, context);
+        if (context.expanded || context.isError || context.isPartial) {
+          return state.delegate.call(base, args, theme, context, header(state, theme));
+        }
+        state.call.setText(header(state, theme));
+        return state.call;
+      },
+      renderResult(result, options, theme, context) {
+        const state = stateFor(context.args, context);
+        const previous = state.summary;
+        const wasImage = state.image;
+        state.image = result.content.some((c) => c.type === "image");
+        state.summary = context.isError || options.isPartial ? undefined : summarize(state.args, result);
+        if (previous?.text !== state.summary?.text || previous?.tone !== state.summary?.tone || wasImage !== state.image) {
+          refreshOthers(state.member);
+        }
+        state.call.setText(header(state, theme));
+        if (context.isError || options.expanded || options.isPartial) return state.delegate.result(base, result, theme, context);
+        if (state.delegate.used) state.delegate.result(base, result, theme, context);
+        state.result.setText("");
+        return state.result;
+      },
+    };
   });
 }

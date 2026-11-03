@@ -76,7 +76,19 @@ Restart Pi or run `/reload` after changing extensions or skills.
 | `extensions/prevent-idle-sleep.ts` | Prevents macOS idle sleep with `caffeinate` |
 | `APPEND_SYSTEM.md` | Personal tools, secrets location, timezone, storage facts, and public-delivery approval rule |
 | `mcp.json` | Official Ordinal and Figma MCP defaults installed by setup |
-| `skills/` | Two optional skills: content publishing and visual style; see `skills/README.md` |
+| `skills/` | Two small Isaac-specific skills: publishing conventions and visual preferences; see `skills/README.md` |
+
+## Compact bash and read displays
+
+`bash-view` and `read-view` customize rendering only; they do not replace tool
+execution. Expanded/error views delegate to the active tool's renderer, including
+renderers supplied by other extensions. Bash keeps a live tail while running and
+a line-count summary when done.
+
+Consecutive successful text reads share an aggregate summary, in source order
+rather than completion order. Pending reads, failures, images, and expanded rows
+stay separate. Repeated ranges of the same path count as one file. Restored
+history displays individual reads instead of reconstructing speculative groups.
 
 ## Diff display
 
@@ -118,7 +130,7 @@ resume/export, but is not injected into the model's text context.
 
 - `./setup.sh`: installs dependencies and wires Harpy into `~/.pi/agent/`
 - `npm run typecheck`: type-checks the extensions and tests against Pi 1.5.0
-- `npm test`: runs diff, rendering, file-write, and extension-loading regression tests
+- `npm test`: runs diff, bash/read rendering, file-write, lifecycle, and extension-loading regression tests
 
 ## Run Pi
 
