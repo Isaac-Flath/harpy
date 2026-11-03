@@ -5,10 +5,10 @@ import {
   type ReadToolDetails,
   type ReadToolInput,
   type ToolRenderResultOptions,
-} from "@mariozechner/pi-coding-agent";
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 
 const SHOWING_LINES_RE = /^\[Showing lines (\d+)-(\d+) of (\d+).+\]$/;
 const MORE_LINES_RE = /^\[(\d+) more lines in file\. Use offset=(\d+) to continue\.\]$/;

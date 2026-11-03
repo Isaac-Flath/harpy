@@ -1,6 +1,6 @@
 # harpy
 
-Harpy is my personal [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) package.
+Harpy is my personal [Pi coding agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent) package.
 It adds display improvements, macOS idle sleep prevention, and a small collection of personal content-workflow skills.
 It appends a short personal tool-awareness note through `APPEND_SYSTEM.md`, preserving Pi's default system prompt.
 
@@ -12,13 +12,13 @@ I built this for myself first. You are welcome to use it or copy pieces from it,
 
 ### Prerequisites
 
-- Node.js 20+
-- Pi installed locally
+- Node.js 22.19+
+- Pi 1.5.0+ installed locally
 
 If Pi is not installed yet:
 
 ```bash
-npm install -g @mariozechner/pi-coding-agent
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
 Install Harpy:
@@ -49,7 +49,7 @@ If Figma rejects OAuth client registration, consult Pi's MCP troubleshooting
 options before changing the server configuration. A project-level `.pi/mcp.json`
 can override a global server.
 
-Check the extensions with `npm run typecheck`.
+Check the extensions with `npm run typecheck && npm test`.
 
 ## What `setup.sh` does
 
@@ -78,10 +78,47 @@ Restart Pi or run `/reload` after changing extensions or skills.
 | `mcp.json` | Official Ordinal and Figma MCP defaults installed by setup |
 | `skills/` | Two optional skills: content publishing and visual style; see `skills/README.md` |
 
+## Diff display
+
+`extensions/diff-view.ts` customizes the `edit` and `write` display without adding
+model calls or changing their model-facing output. Non-Markdown files collapse to
+an action and `+added −removed` line counts; `.md` and `.mdx` keep a short inline
+preview. Expand tool output (normally `Ctrl+O`; the hint follows your keybindings)
+for more detail. Tabs display as `→` followed by two spaces, and carriage returns
+as `␍`, so whitespace-only changes remain visible.
+
+The default layout is unified below 140 available columns and side-by-side above
+that. Override it for one invocation or set a shell preference:
+
+```bash
+pi --diff-layout unified
+pi --diff-layout split
+export HARPY_DIFF_LAYOUT=auto  # auto | unified | split
+```
+
+Even forced split falls back to unified below 60 columns. Invalid preferences
+warn and fall back to `auto`. Restart Pi after changing the environment variable.
+
+Edit execution stays with Pi. Write previews use a small wrapper around Pi's
+local write operations: old contents are captured inside Pi's per-file mutation
+queue, using Pi's resolved path. Missing, unreadable, binary, and oversized
+originals are distinguished; failed preview capture never prevents a write.
+As with other tool overrides, a different extension replacing `write` can replace
+this capture wrapper (for example a remote-filesystem extension).
+
+Previews are deliberately bounded: each write input is limited to 64 KiB and
+1,000 lines **for diff computation only**, not for the write itself. Larger diffs
+show an omission notice. Rendered previews show up to 20 rows when collapsed and
+2,000 when expanded, clip individual source lines at 4,000 characters with a
+notice, and bound word-level comparisons. These limits keep large/generated
+files from stalling the UI. Diff metadata is saved with the tool result for
+resume/export, but is not injected into the model's text context.
+
 ## Scripts
 
 - `./setup.sh`: installs dependencies and wires Harpy into `~/.pi/agent/`
-- `npm run typecheck`: type-checks the extensions
+- `npm run typecheck`: type-checks the extensions and tests against Pi 1.5.0
+- `npm test`: runs diff, rendering, file-write, and extension-loading regression tests
 
 ## Run Pi
 

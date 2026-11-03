@@ -14,10 +14,10 @@ import {
   type BashToolInput,
   type ExtensionAPI,
   type ToolRenderResultOptions,
-} from "@mariozechner/pi-coding-agent";
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { summarizeSingleLine } from "./lib/render-text.js";
 
 const COMMAND_MAX = 72;
