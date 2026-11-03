@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ordinal": {
+      "url": "https://app.tryordinal.com/mcp",
+      "exposure": "deferred",
+      "description": "Ordinal social posts, media uploads, scheduling, approvals, and analytics."
+    },
+    "figma": {
+      "url": "https://mcp.figma.com/mcp",
+      "exposure": "deferred",
+      "description": "Figma design context and supported canvas workflows."
+    }
+  }
+}
